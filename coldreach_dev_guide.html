@@ -1,0 +1,1188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ColdReach — Phase-wise Development Guide</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+  :root {
+    --ink: #0f0f0f;
+    --ink-2: #3a3a3a;
+    --ink-3: #6b6b6b;
+    --ink-4: #9b9b9b;
+    --surface: #ffffff;
+    --surface-2: #f7f7f5;
+    --surface-3: #f0f0ec;
+    --border: #e8e8e4;
+    --border-2: #d8d8d4;
+    --accent: #1a1a2e;
+    --accent-soft: #e8e8f0;
+    --blue: #2563eb;
+    --blue-soft: #eff6ff;
+    --green: #16a34a;
+    --green-soft: #f0fdf4;
+    --amber: #d97706;
+    --amber-soft: #fffbeb;
+    --red: #dc2626;
+    --red-soft: #fef2f2;
+    --purple: #7c3aed;
+    --purple-soft: #f5f3ff;
+    --teal: #0d9488;
+    --teal-soft: #f0fdfa;
+    --font: 'Sora', sans-serif;
+    --mono: 'JetBrains Mono', monospace;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: var(--font);
+    background: var(--surface-2);
+    color: var(--ink);
+    line-height: 1.6;
+    font-size: 14px;
+  }
+
+  /* ── Cover ── */
+  .cover {
+    background: var(--accent);
+    color: #fff;
+    padding: 80px 60px 60px;
+    position: relative;
+    overflow: hidden;
+  }
+  .cover::before {
+    content: '';
+    position: absolute;
+    top: -80px; right: -80px;
+    width: 400px; height: 400px;
+    border-radius: 50%;
+    border: 1px solid rgba(255,255,255,0.06);
+  }
+  .cover::after {
+    content: '';
+    position: absolute;
+    bottom: -120px; left: -40px;
+    width: 300px; height: 300px;
+    border-radius: 50%;
+    border: 1px solid rgba(255,255,255,0.04);
+  }
+  .cover-eyebrow {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.45);
+    margin-bottom: 20px;
+  }
+  .cover-title {
+    font-size: 48px;
+    font-weight: 700;
+    letter-spacing: -1.5px;
+    line-height: 1.05;
+    margin-bottom: 16px;
+  }
+  .cover-title span {
+    color: rgba(255,255,255,0.35);
+  }
+  .cover-sub {
+    font-size: 16px;
+    color: rgba(255,255,255,0.55);
+    max-width: 520px;
+    line-height: 1.6;
+    margin-bottom: 40px;
+  }
+  .cover-meta {
+    display: flex;
+    gap: 32px;
+  }
+  .meta-item {
+    border-left: 1px solid rgba(255,255,255,0.15);
+    padding-left: 16px;
+  }
+  .meta-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: rgba(255,255,255,0.4);
+    margin-bottom: 4px;
+  }
+  .meta-val {
+    font-size: 13px;
+    font-weight: 500;
+    color: rgba(255,255,255,0.85);
+  }
+
+  /* ── Layout ── */
+  .container {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 0 40px 100px;
+  }
+
+  /* ── TOC ── */
+  .toc {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 32px;
+    margin: 40px 0;
+  }
+  .toc-title {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    margin-bottom: 20px;
+  }
+  .toc-phases {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 6px;
+  }
+  .toc-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    border-radius: 8px;
+    text-decoration: none;
+    color: var(--ink-2);
+    transition: background 0.15s;
+    font-size: 13px;
+  }
+  .toc-item:hover { background: var(--surface-2); }
+  .toc-num {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--ink-4);
+    font-family: var(--mono);
+    min-width: 24px;
+  }
+
+  /* ── Phase Sections ── */
+  .phase-section {
+    margin-top: 56px;
+  }
+
+  .phase-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 20px;
+    margin-bottom: 28px;
+  }
+  .phase-badge {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    width: 56px;
+    height: 56px;
+    border-radius: 14px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    flex-shrink: 0;
+  }
+  .phase-badge .ph-num { font-size: 20px; font-family: var(--mono); }
+  .phase-badge .ph-label { font-size: 8px; text-transform: uppercase; letter-spacing: 1px; opacity: 0.7; }
+
+  .phase-p1 .phase-badge { background: #1e1b4b; color: #a5b4fc; }
+  .phase-p2 .phase-badge { background: #064e3b; color: #6ee7b7; }
+  .phase-p3 .phase-badge { background: #1e3a5f; color: #93c5fd; }
+  .phase-p4 .phase-badge { background: #4a1942; color: #f9a8d4; }
+  .phase-p5 .phase-badge { background: #451a03; color: #fcd34d; }
+  .phase-p6 .phase-badge { background: #1c1917; color: #d6d3d1; }
+
+  .phase-info { flex: 1; }
+  .phase-name {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+    margin-bottom: 6px;
+  }
+  .phase-desc { color: var(--ink-3); font-size: 13.5px; line-height: 1.55; }
+  .phase-duration {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 4px 10px;
+    border-radius: 20px;
+    margin-top: 10px;
+    background: var(--surface-3);
+    color: var(--ink-3);
+    font-family: var(--mono);
+  }
+
+  /* ── Task Cards ── */
+  .task-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .task-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px 20px;
+    display: flex;
+    gap: 16px;
+    align-items: flex-start;
+  }
+  .task-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    flex-shrink: 0;
+  }
+  .task-body { flex: 1; }
+  .task-title {
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--ink);
+    margin-bottom: 4px;
+  }
+  .task-desc {
+    font-size: 12.5px;
+    color: var(--ink-3);
+    line-height: 1.5;
+  }
+  .task-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    margin-top: 8px;
+  }
+  .tag {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-family: var(--mono);
+  }
+  .tag-fe { background: var(--blue-soft); color: var(--blue); }
+  .tag-be { background: var(--green-soft); color: var(--green); }
+  .tag-db { background: var(--purple-soft); color: var(--purple); }
+  .tag-ux { background: var(--amber-soft); color: var(--amber); }
+  .tag-cfg { background: var(--teal-soft); color: var(--teal); }
+  .tag-crit { background: var(--red-soft); color: var(--red); }
+
+  /* ── Priority indicators ── */
+  .task-card.priority-high { border-left: 3px solid var(--red); }
+  .task-card.priority-med { border-left: 3px solid var(--amber); }
+  .task-card.priority-low { border-left: 3px solid var(--border-2); }
+
+  /* ── Section header ── */
+  .section-label {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--ink-4);
+    margin: 28px 0 12px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .section-label::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+
+  /* ── API / code blocks ── */
+  .code-block {
+    background: #0f1117;
+    border-radius: 8px;
+    padding: 14px 16px;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: #a9b1d6;
+    overflow-x: auto;
+    margin: 10px 0;
+    line-height: 1.6;
+  }
+  .code-block .kw { color: #7aa2f7; }
+  .code-block .str { color: #9ece6a; }
+  .code-block .cmt { color: #565f89; }
+  .code-block .fn { color: #7dcfff; }
+
+  /* ── UI spec blocks ── */
+  .ui-spec {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 18px;
+    margin: 10px 0;
+  }
+  .ui-spec-title {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--ink-4);
+    margin-bottom: 10px;
+  }
+  .spec-row {
+    display: flex;
+    gap: 16px;
+    font-size: 12.5px;
+    color: var(--ink-2);
+    margin-bottom: 6px;
+    align-items: flex-start;
+  }
+  .spec-key {
+    font-weight: 600;
+    min-width: 140px;
+    color: var(--ink-3);
+    font-size: 12px;
+  }
+
+  /* ── Callout boxes ── */
+  .callout {
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin: 16px 0;
+    display: flex;
+    gap: 12px;
+    font-size: 12.5px;
+    line-height: 1.5;
+  }
+  .callout.info { background: var(--blue-soft); border: 1px solid #bfdbfe; color: #1d4ed8; }
+  .callout.warn { background: var(--amber-soft); border: 1px solid #fde68a; color: #92400e; }
+  .callout.tip  { background: var(--green-soft); border: 1px solid #bbf7d0; color: #15803d; }
+  .callout.idea { background: var(--purple-soft); border: 1px solid #ddd6fe; color: #5b21b6; }
+  .callout-icon { font-size: 16px; flex-shrink: 0; }
+
+  /* ── Phase timeline bar ── */
+  .timeline {
+    display: flex;
+    gap: 0;
+    margin: 40px 0 48px;
+    border-radius: 10px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+  }
+  .tl-phase {
+    flex: 1;
+    padding: 12px 14px;
+    font-size: 11px;
+    font-weight: 600;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .tl-label { opacity: 0.7; font-size: 9px; letter-spacing: 0.5px; text-transform: uppercase; }
+  .tl-weeks { font-family: var(--mono); font-size: 10px; opacity: 0.6; }
+  .tl-p1 { background: #1e1b4b; color: #c7d2fe; }
+  .tl-p2 { background: #14532d; color: #bbf7d0; }
+  .tl-p3 { background: #1e3a5f; color: #bfdbfe; }
+  .tl-p4 { background: #4a1942; color: #f9a8d4; }
+  .tl-p5 { background: #451a03; color: #fde68a; }
+  .tl-p6 { background: #1c1917; color: #d6d3d1; }
+
+  /* ── Suggestions section ── */
+  .suggestion-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-top: 16px;
+  }
+  .sug-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 18px;
+  }
+  .sug-emoji { font-size: 20px; margin-bottom: 8px; }
+  .sug-title { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+  .sug-body { font-size: 12px; color: var(--ink-3); line-height: 1.5; }
+
+  /* ── Backend schema table ── */
+  .schema-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+    margin: 10px 0;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+  }
+  .schema-table th {
+    background: var(--surface-3);
+    text-align: left;
+    padding: 8px 12px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--ink-3);
+    border-bottom: 1px solid var(--border);
+  }
+  .schema-table td {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    color: var(--ink-2);
+    font-family: var(--mono);
+    font-size: 11.5px;
+  }
+  .schema-table tr:last-child td { border-bottom: none; }
+  .schema-table .new-col { color: var(--blue); font-weight: 600; }
+
+  /* ── Divider ── */
+  .divider { height: 1px; background: var(--border); margin: 48px 0; }
+
+  h3.sub {
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: -0.2px;
+    margin: 24px 0 12px;
+    color: var(--ink);
+  }
+
+  .footer {
+    background: var(--accent);
+    color: rgba(255,255,255,0.4);
+    text-align: center;
+    padding: 24px;
+    font-size: 12px;
+    letter-spacing: 0.3px;
+  }
+</style>
+</head>
+<body>
+
+<!-- COVER -->
+<div class="cover">
+  <div class="cover-eyebrow">Internal Engineering Document</div>
+  <div class="cover-title">ColdReach<br><span>Development Roadmap</span></div>
+  <div class="cover-sub">Complete phase-wise guide covering UI modernisation, IST timezone, advanced lead management, email variant sequences, deliverability controls, custom inbox integration, and live campaign editing.</div>
+  <div class="cover-meta">
+    <div class="meta-item"><div class="meta-label">Total Phases</div><div class="meta-val">6 Phases</div></div>
+    <div class="meta-item"><div class="meta-label">Est. Timeline</div><div class="meta-val">14–18 weeks</div></div>
+    <div class="meta-item"><div class="meta-label">Stack</div><div class="meta-val">React · FastAPI · Celery</div></div>
+    <div class="meta-item"><div class="meta-label">Timezone</div><div class="meta-val">Asia/Kolkata (IST)</div></div>
+  </div>
+</div>
+
+<div class="container">
+
+  <!-- TOC -->
+  <div class="toc">
+    <div class="toc-title">Contents</div>
+    <div class="toc-phases">
+      <a class="toc-item" href="#p1"><span class="toc-num">01</span>UI/UX Overhaul — Modern, Compact, Detailed</a>
+      <a class="toc-item" href="#p2"><span class="toc-num">02</span>IST Timezone · Deliverability Toggles · Lead Controls</a>
+      <a class="toc-item" href="#p3"><span class="toc-num">03</span>Email Variants · A/B Sequence Builder</a>
+      <a class="toc-item" href="#p4"><span class="toc-num">04</span>Custom Email Providers · Google Workspace OAuth</a>
+      <a class="toc-item" href="#p5"><span class="toc-num">05</span>Live Campaign Editing with Auto-Adjustment</a>
+      <a class="toc-item" href="#p6"><span class="toc-num">06</span>Advanced Filters, Export, Attachments, File Download</a>
+    </div>
+  </div>
+
+  <!-- Timeline bar -->
+  <div class="timeline">
+    <div class="tl-phase tl-p1"><div class="tl-label">Phase 1</div>UI Overhaul<div class="tl-weeks">Wk 1–3</div></div>
+    <div class="tl-phase tl-p2"><div class="tl-label">Phase 2</div>Core Features<div class="tl-weeks">Wk 3–5</div></div>
+    <div class="tl-phase tl-p3"><div class="tl-label">Phase 3</div>Variants<div class="tl-weeks">Wk 5–7</div></div>
+    <div class="tl-phase tl-p4"><div class="tl-label">Phase 4</div>Custom Email<div class="tl-weeks">Wk 7–10</div></div>
+    <div class="tl-phase tl-p5"><div class="tl-label">Phase 5</div>Live Editing<div class="tl-weeks">Wk 10–13</div></div>
+    <div class="tl-phase tl-p6"><div class="tl-label">Phase 6</div>Advanced<div class="tl-weeks">Wk 13–18</div></div>
+  </div>
+
+  <!-- ───────────── PHASE 1 ───────────── -->
+  <div class="phase-section phase-p1" id="p1">
+    <div class="phase-header">
+      <div class="phase-badge"><span class="ph-num">01</span><span class="ph-label">Phase</span></div>
+      <div class="phase-info">
+        <div class="phase-name">UI / UX Overhaul</div>
+        <div class="phase-desc">Rebuild every screen and component to be modern, compact, and information-dense. Shift from scattered inline styles to a cohesive design system. No functional regressions — purely visual and structural improvements.</div>
+        <div class="phase-duration">⏱ Weeks 1–3 · ~60h frontend work</div>
+      </div>
+    </div>
+
+    <div class="section-label">Design System Foundation</div>
+    <div class="task-grid">
+      <div class="task-card priority-high">
+        <div class="task-icon" style="background:#eff6ff">🎨</div>
+        <div class="task-body">
+          <div class="task-title">Create globals.css — Design Tokens</div>
+          <div class="task-desc">Extract all inline styles into CSS custom properties. Centralise colours, spacing scale (4/8/12/16/24/32px), border-radius (6/10/14/20px), shadow levels, and typography scale. Every component references tokens — nothing hardcoded.</div>
+          <div class="task-tags"><span class="tag tag-fe">Frontend</span><span class="tag tag-crit">Critical</span></div>
+        </div>
+      </div>
+      <div class="task-card priority-high">
+        <div class="task-icon" style="background:#f0fdf4">🔠</div>
+        <div class="task-body">
+          <div class="task-title">Typography — Switch to Geist + Geist Mono</div>
+          <div class="task-desc">Import Geist (body/UI) and Geist Mono (code, numbers, IDs). Define type scale: 11px caption → 13px secondary → 14px body → 16px lead → 20px subheading → 28px heading. Remove DM Sans imports scattered across components.</div>
+          <div class="task-tags"><span class="tag tag-fe">Frontend</span><span class="tag tag-ux">UX</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-label">Navigation & Shell</div>
+    <div class="task-grid">
+      <div class="task-card priority-high">
+        <div class="task-icon" style="background:#faf5ff">🗂</div>
+        <div class="task-body">
+          <div class="task-title">Sidebar — Compact, Collapsible, Icon-Rail Mode</div>
+          <div class="task-desc">Shrink sidebar from 224px → 200px expanded / 56px collapsed. Add icon-only rail mode toggle. Icons for each nav item (Lucide). Show unread badge on Inbox. Add "New Campaign" shortcut button at bottom of rail. Persist collapse state in localStorage.</div>
+          <div class="ui-spec">
+            <div class="ui-spec-title">Layout Spec</div>
+            <div class="spec-row"><div class="spec-key">Expanded width</div><div>200px, border-right 1px solid --border</div></div>
+            <div class="spec-row"><div class="spec-key">Collapsed width</div><div>56px, icons centered, tooltips on hover</div></div>
+            <div class="spec-row"><div class="spec-key">Nav item height</div><div>36px, 8px vertical gap, 10px border-radius</div></div>
+            <div class="spec-row"><div class="spec-key">Active state</div><div>bg: --surface-3, left border 2px solid --accent</div></div>
+          </div>
+          <div class="task-tags"><span class="tag tag-fe">Frontend</span><span class="tag tag-ux">UX</span><span class="tag tag-crit">Critical</span></div>
+        </div>
+      </div>
+      <div class="task-card priority-med">
+        <div class="task-icon" style="background:#fff7ed">🔔</div>
+        <div class="task-body">
+          <div class="task-title">Global Topbar — Search, Notifications, User Menu</div>
+          <div class="task-desc">48px fixed topbar. Add global search (Cmd+K shortcut) that fuzzy-searches campaigns and leads. Notification bell with dropdown showing recent activity (last 5 events). User avatar with dropdown: account settings, timezone selector, sign out.</div>
+          <div class="task-tags"><span class="tag tag-fe">Frontend</span><span class="tag tag-ux">UX</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-label">Campaign List Screen</div>
+    <div class="task-grid">
+      <div class="task-card priority-high">
+        <div class="task-icon" style="background:#f0fdf4">📋</div>
+        <div class="task-body">
+          <div class="task-title">Campaign Cards → Dense Data Table + Card Toggle</div>
+          <div class="task-desc">Replace simple card list with a hybrid: default is a compact table with inline stats (Sent, Reply Rate, Open Rate, Bounce Rate, Status, Created). Add toggle to switch to card view. Each row has quick-action menu (⋯) for Pause/Activate, Duplicate, Archive, Settings. Row click → campaign detail. Sort by any column header.</div>
+          <div class="ui-spec">
+            <div class="ui-spec-title">Table Columns</div>
+            <div class="spec-row"><div class="spec-key">Name</div><div>Truncated at 200px, status badge inline</div></div>
+            <div class="spec-row"><div class="spec-key">Leads</div><div>Total / Remaining in funnel</div></div>
+            <div class="spec-row"><div class="spec-key">Sent</div><div>Count + sparkline (7-day)</div></div>
+            <div class="spec-row"><div class="spec-key">Reply Rate</div><div>Coloured pill: green &gt;10%, amber 5–10%, red &lt;5%</div></div>
+            <div class="spec-row"><div class="spec-key">Status</div><div>Compact badge + toggle switch inline</div></div>
+            <div class="spec-row"><div class="spec-key">Created</div><div>Relative date (e.g. "3d ago")</div></div>
+          </div>
+          <div class="task-tags"><span class="tag tag-fe">Frontend</span><span class="tag tag-ux">UX</span><span class="tag tag-crit">Critical</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-label">Campaign Detail — Tab System Redesign</div>
+    <div class="task-grid">
+      <div class="task-card priority-high">
+        <div class="task-icon" style="background:#eff6ff">📊</div>
+        <div class="task-body">
+          <div class="task-title">Stats Hero Strip — Always Visible</div>
+          <div class="task-desc">Replace the 4-card stats row with a compact 8-metric horizontal strip pinned below the campaign name. Each metric: 14px mono number + 10px label + trend delta vs previous 7 days. Metrics: Total Leads · Contacted · Replied · Open Rate* · Reply Rate · Bounce Rate · Emails Sent Today · Scheduled. (* toggleable based on deliverability setting — see Phase 2)</div>
+          <div class="task-tags"><span class="tag tag-fe">Frontend</span><span class="tag tag-ux">UX</span></div>
+        </div>
+      </div>
+      <div class="task-card priority-high">
+        <div class="task-icon" style="background:#f5f3ff">🗃</div>
+        <div class="task-body">
+          <div class="task-title">Tab Bar — Underline Style, Keyboard Navigable</div>
+          <div class="task-desc">Replace pill tabs with clean underline tabs: Leads · Sequence · Variants (new) · Activity · Inboxes · Analytics · Settings. Keyboard navigable (arrow keys). Each tab shows count badge (leads count, steps count). Active = 2px underline in --accent. Sticky on scroll past hero strip.</div>
+          <div class="task-tags"><span class="tag tag-fe">Frontend</span><span class="tag tag-ux">UX</span></div>
+        </div>
+      </div>
+      <div class="task-card priority-med">
+        <div class="task-icon" style="background:#fff7ed">🧹</div>
+        <div class="task-body">
+          <div class="task-title">Leads Table — Column Pinning, Resizable, Virtualised</div>
+          <div class="task-desc">Migrate leads table to react-virtual for 10k+ rows without lag. Pin first 3 columns (# · Name · Email). Make columns resizable by dragging header dividers. Column visibility toggle (hide/show custom fields). Row actions: quick status change via right-click context menu.</div>
+          <div class="task-tags"><span class="tag tag-fe">Frontend</span><span class="tag tag-crit">Critical</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-label">New Campaign Form</div>
+    <div class="task-grid">
+      <div class="task-card priority-med">
+        <div class="task-icon" style="background:#f0fdfa">⚙️</div>
+        <div class="task-body">
+          <div class="task-title">Restructure to 4-Step Wizard + Live Preview Panel</div>
+          <div class="task-desc">Add Step 4: "Email Account" selection during creation. Right-side 320px preview panel shows a live email mock rendering the sending window on a mini clock face, active days highlighted on a week grid, and a "Your capacity today" summary. Step indicators show completion checkmarks and allow non-linear jumping.</div>
+          <div class="task-tags"><span class="tag tag-fe">Frontend</span><span class="tag tag-ux">UX</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-label">Email Accounts Screen</div>
+    <div class="task-grid">
+      <div class="task-card priority-med">
+        <div class="task-icon" style="background:#eff6ff">📨</div>
+        <div class="task-body">
+          <div class="task-title">Provider Cards with Health Dashboard</div>
+          <div class="task-desc">Each account card: left column = provider logo + name + email; right column = health meter (circular progress), daily usage bar, bounce rate, reply rate, warmup progress. Add "Test Connection" button that sends a self-email and shows latency. Account type badges: Gmail · Workspace · Outlook · Custom SMTP.</div>
+          <div class="task-tags"><span class="tag tag-fe">Frontend</span><span class="tag tag-ux">UX</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-label">Inbox Redesign</div>
+    <div class="task-grid">
+      <div class="task-card priority-med">
+        <div class="task-icon" style="background:#faf5ff">💬</div>
+        <div class="task-body">
+          <div class="task-title">Three-Panel Layout — Conversation List · Thread · Lead Profile</div>
+          <div class="task-desc">Expand to 3 panels: 240px conversation list · flex thread panel · 280px lead profile sidebar. Lead profile shows: status dropdown, all custom fields (editable inline), full sequence history timeline, linked campaign, notes field. Thread: show step number badge on each outbound email. Add "Mark as read" on hover.</div>
+          <div class="task-tags"><span class="tag tag-fe">Frontend</span><span class="tag tag-ux">UX</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="callout tip">
+      <div class="callout-icon">✅</div>
+      <div>Phase 1 completion criterion: All existing pages render in the new design system. Zero functional regression. Lighthouse performance score ≥ 85. All tables handle 5000+ rows without jank.</div>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- ───────────── PHASE 2 ───────────── -->
+  <div class="phase-section phase-p2" id="p2">
+    <div class="phase-header">
+      <div class="phase-badge"><span class="ph-num">02</span><span class="ph-label">Phase</span></div>
+      <div class="phase-info">
+        <div class="phase-name">IST Timezone · Deliverability Toggles · Lead Controls</div>
+        <div class="phase-desc">Set IST as default timezone, add tracking toggle controls for open/reply rate, and implement download, delete, and filter for leads.</div>
+        <div class="phase-duration">⏱ Weeks 3–5 · ~35h full-stack work</div>
+      </div>
+    </div>
+
+    <div class="section-label">IST as Default Timezone</div>
+    <div class="task-grid">
+      <div class="task-card priority-high">
+        <div class="task-icon" style="background:#f0fdf4">🕐</div>
+        <div class="task-body">
+          <div class="task-title">Backend — Default Campaign Timezone → Asia/Kolkata</div>
+          <div class="task-desc">Change the default value for <code>timezone</code> on the Campaign model from "UTC" to "Asia/Kolkata". Update the campaign_engine.py to always interpret sending_window_start/end in the campaign's stored timezone using pytz/zoneinfo. Ensure all scheduled_for timestamps in ScheduledEmail are stored in UTC but displayed in IST.</div>
+          <div class="code-block"><span class="cmt"># app/models/__init__.py — change default</span>
+timezone = <span class="fn">Column</span>(<span class="str">String</span>(<span class="str">100</span>), default=<span class="str">"Asia/Kolkata"</span>)
+
+<span class="cmt"># campaign_engine.py — always localise</span>
+<span class="kw">from</span> zoneinfo <span class="kw">import</span> ZoneInfo
+tz = ZoneInfo(campaign.timezone <span class="kw">or</span> <span class="str">"Asia/Kolkata"</span>)
+now_local = datetime.now(tz)
+window_start = time.fromisoformat(campaign.sending_window_start)</div>
+          <div class="task-tags"><span class="tag tag-be">Backend</span><span class="tag tag-db">DB</span><span class="tag tag-crit">Critical</span></div>
+        </div>
+      </div>
+      <div class="task-card priority-high">
+        <div class="task-icon" style="background:#fff7ed">🌐</div>
+        <div class="task-body">
+          <div class="task-title">Frontend — All Timestamps Display in IST</div>
+          <div class="task-desc">Replace all <code>new Date(ts).toLocaleString()</code> calls with a global <code>formatIST(ts)</code> utility: <code>Intl.DateTimeFormat('en-IN', { timeZone: 'Asia/Kolkata', ... })</code>. The campaign form's schedule step should show "IST" label on time pickers, and the visual time bar should display IST hours. Activity feed timestamps: show IST absolute + relative.</div>
+          <div class="task-tags"><span class="tag tag-fe">Frontend</span><span class="tag tag-ux">UX</span></div>
+        </div>
+      </div>
+      <div class="task-card priority-med">
+        <div class="task-icon" style="background:#eff6ff">🌍</div>
+        <div class="task-body">
+          <div class="task-title">Timezone Selector in Campaign Settings + User Profile</div>
+          <div class="task-desc">Add a searchable timezone dropdown (using Intl.supportedValuesOf('timeZone')) to both the New Campaign form (Step 3: Schedule) and the Campaign Settings panel. In user profile settings, add a global default timezone preference (defaults to Asia/Kolkata). All time displays respect per-campaign timezone.</div>
+          <div class="task-tags"><span class="tag tag-fe">Frontend</span><span class="tag tag-be">Backend</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-label">Deliverability Toggle Controls</div>
+    <div class="task-grid">
+      <div class="task-card priority-high">
+        <div class="task-icon" style="background:#fef2f2">📡</div>
+        <div class="task-body">
+          <div class="task-title">Open Rate / Reply Rate Tracking Toggles per Campaign</div>
+          <div class="task-desc">Add two boolean fields to the Campaign model: <code>track_opens</code> and <code>track_clicks</code> (both default False — safest for deliverability). In campaign settings, show these as toggles with a deliverability impact explanation. When <code>track_opens=False</code>, skip inserting tracking pixels in email body. When <code>track_clicks=False</code>, do not wrap links.</div>
+          <div class="callout warn">
+            <div class="callout-icon">⚠️</div>
+            <div>Tracking pixels and link wrapping add headers/content that spam filters detect. Disabling improves deliverability significantly. Open rate becomes 0 (unknown) but reply rate remains accurate since it's IMAP-based.</div>
+          </div>
+          <div class="code-block"><span class="cmt"># New model fields</span>
+track_opens = <span class="fn">Column</span>(<span class="str">Boolean</span>, default=<span class="str">False</span>)
+track_clicks = <span class="fn">Column</span>(<span class="str">Boolean</span>, default=<span class="str">False</span>)
+
+<span class="cmt"># email_sender.py — conditional pixel</span>
+<span class="kw">if</span> campaign.track_opens:
+    body += f<span class="str">'&lt;img src="{TRACK_URL}/{event_id}" /&gt;'</span></div>
+          <div class="task-tags"><span class="tag tag-be">Backend</span><span class="tag tag-fe">Frontend</span><span class="tag tag-db">DB</span><span class="tag tag-crit">Critical</span></div>
+        </div>
+      </div>
+      <div class="task-card priority-med">
+        <div class="task-icon" style="background:#f5f3ff">📈</div>
+        <div class="task-body">
+          <div class="task-title">Analytics — Grey Out Unavailable Metrics with Explanation</div>
+          <div class="task-desc">In the Analytics Dashboard, when <code>track_opens=False</code>, display the Open Rate card with a grey "tracking disabled" state and a "Enable in Settings →" link. Reply Rate always shows (IMAP-detected). Add a Deliverability Score card: calculated from bounce rate, complaint rate, and tracking status.</div>
+          <div class="task-tags"><span class="tag tag-fe">Frontend</span><span class="tag tag-ux">UX</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-label">Lead Management Controls</div>
+    <div class="task-grid">
+      <div class="task-card priority-high">
+        <div class="task-icon" style="background:#eff6ff">⬇️</div>
+        <div class="task-body">
+          <div class="task-title">Download Lead List Button</div>
+          <div class="task-desc">Add a "Download CSV" button in the leads table header. Exports all currently filtered leads (respects active search + filters). Backend endpoint: <code>GET /campaigns/{id}/leads/export?status=REPLIED&amp;search=...</code> returns CSV stream. Filename: <code>{campaign_name}_{filter}_{date}.csv</code>. Include all columns: standard fields + all custom fields + current_step + status.</div>
+          <div class="code-block"><span class="cmt"># routes.py — new endpoint</span>
+<span class="kw">@router</span>.get(<span class="str">"/campaigns/{id}/leads/export"</span>)
+<span class="kw">def</span> <span class="fn">export_leads</span>(id, status=None, search=None, db=...):
+    leads = <span class="fn">build_lead_query</span>(id, status, search, db)
+    <span class="kw">return</span> <span class="fn">StreamingResponse</span>(<span class="fn">generate_csv</span>(leads),
+        media_type=<span class="str">"text/csv"</span>,
+        headers={<span class="str">"Content-Disposition"</span>: f<span class="str">'attachment; filename="{fname}"'</span>})</div>
+          <div class="task-tags"><span class="tag tag-be">Backend</span><span class="tag tag-fe">Frontend</span><span class="tag tag-crit">Critical</span></div>
+        </div>
+      </div>
+      <div class="task-card priority-high">
+        <div class="task-icon" style="background:#fef2f2">🗑</div>
+        <div class="task-body">
+          <div class="task-title">Delete Leads from Campaign</div>
+          <div class="task-desc">Add checkbox column to leads table. Select one or many leads → "Delete Selected" button appears in toolbar. Confirm modal warns: "X leads will be removed. Any scheduled emails for these leads will be cancelled." Backend: DELETE endpoint that sets lead.is_deleted=True (soft delete), cancels associated ScheduledEmail entries, logs CANCELLED events. Cannot undo.</div>
+          <div class="task-tags"><span class="tag tag-be">Backend</span><span class="tag tag-fe">Frontend</span><span class="tag tag-db">DB</span><span class="tag tag-crit">Critical</span></div>
+        </div>
+      </div>
+      <div class="task-card priority-high">
+        <div class="task-icon" style="background:#f0fdf4">🔍</div>
+        <div class="task-body">
+          <div class="task-title">Advanced Lead Filters Panel</div>
+          <div class="task-desc">Slide-in filter panel (right sidebar, 320px) with multi-criteria filtering. Filters: Status (multi-select) · Step (1,2,3…) · Custom fields (if text: contains/equals; if numeric: range) · Date contacted range · Company contains · Has replied Yes/No. Applied filters shown as chips above the table. Filter state serialised to URL params so it's shareable and persistent on reload.</div>
+          <div class="ui-spec">
+            <div class="ui-spec-title">Filter Chips Design</div>
+            <div class="spec-row"><div class="spec-key">Active filter</div><div>Dark pill with "×" to remove, shows filter key + value</div></div>
+            <div class="spec-row"><div class="spec-key">Clear all</div><div>Ghost button, only visible when filters active</div></div>
+            <div class="spec-row"><div class="spec-key">Match count</div><div>"Showing 142 of 890 leads" updates live</div></div>
+          </div>
+          <div class="task-tags"><span class="tag tag-fe">Frontend</span><span class="tag tag-be">Backend</span><span class="tag tag-ux">UX</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- ───────────── PHASE 3 ───────────── -->
+  <div class="phase-section phase-p3" id="p3">
+    <div class="phase-header">
+      <div class="phase-badge"><span class="ph-num">03</span><span class="ph-label">Phase</span></div>
+      <div class="phase-info">
+        <div class="phase-name">Email Variants · A/B Sequence Builder</div>
+        <div class="phase-desc">Allow multiple sequence variants per campaign. The engine randomly (or weighted) assigns each lead to a variant. Track per-variant performance for A/B testing subject lines, opening hooks, and CTAs.</div>
+        <div class="phase-duration">⏱ Weeks 5–7 · ~45h full-stack work</div>
+      </div>
+    </div>
+
+    <div class="callout idea">
+      <div class="callout-icon">💡</div>
+      <div>Currently, each campaign has exactly one Sequence. This phase adds a SequenceVariant layer: a campaign can have 2–5 named variants (e.g. "Variant A — Pain-led", "Variant B — Social Proof"). Each variant has its own sequence steps. The engine assigns leads to variants at first contact and sticks to that variant for all follow-ups.</div>
+    </div>
+
+    <div class="section-label">Database Changes</div>
+    <div class="task-grid">
+      <div class="task-card priority-high">
+        <div class="task-icon" style="background:#eff6ff">🗄</div>
+        <div class="task-body">
+          <div class="task-title">Add SequenceVariant Table + Lead Variant Assignment</div>
+          <div class="task-desc">Rename the current Sequence as the "default variant" (variant_index=0). Add a <code>variant_name</code> and <code>weight</code> field to Sequence. Add <code>assigned_variant_id</code> to Lead. Migration: set all existing leads' assigned_variant_id to their campaign's current (only) sequence ID.</div>
+          <table class="schema-table">
+            <tr><th>Column</th><th>Type</th><th>Notes</th></tr>
+            <tr><td class="new-col">Sequence.variant_name</td><td>VARCHAR(100)</td><td>e.g. "Variant A — Pain-led"</td></tr>
+            <tr><td class="new-col">Sequence.weight</td><td>FLOAT</td><td>0.0–1.0, all variants sum to 1.0</td></tr>
+            <tr><td class="new-col">Sequence.is_control</td><td>BOOLEAN</td><td>marks the original/control variant</td></tr>
+            <tr><td class="new-col">Lead.assigned_variant_id</td><td>FK → sequences.id</td><td>assigned at first contact; NULL = unassigned</td></tr>
+          </table>
+          <div class="task-tags"><span class="tag tag-db">DB Migration</span><span class="tag tag-be">Backend</span><span class="tag tag-crit">Critical</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-label">Backend — Assignment Engine</div>
+    <div class="task-grid">
+      <div class="task-card priority-high">
+        <div class="task-icon" style="background:#f0fdf4">⚙️</div>
+        <div class="task-body">
+          <div class="task-title">Weighted Random Variant Assignment on First Email</div>
+          <div class="task-desc">In campaign_engine.py, when scheduling a lead's first email (step 1), check if lead.assigned_variant_id is None. If so, pick a variant using weighted random selection based on each Sequence's weight field. Save the assignment to the lead record. All subsequent emails use the same variant_id. This ensures one lead sees only one consistent sequence of emails.</div>
+          <div class="code-block"><span class="kw">def</span> <span class="fn">assign_variant</span>(campaign_id, lead, db):
+    variants = db.query(Sequence)<span class="fn">.filter_by</span>(campaign_id=campaign_id)<span class="fn">.all</span>()
+    weights = [v.weight <span class="kw">for</span> v <span class="kw">in</span> variants]
+    chosen = random<span class="fn">.choices</span>(variants, weights=weights, k=1)[0]
+    lead.assigned_variant_id = chosen.id
+    db<span class="fn">.commit</span>()
+    <span class="kw">return</span> chosen</div>
+          <div class="task-tags"><span class="tag tag-be">Backend</span><span class="tag tag-crit">Critical</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-label">Frontend — Variants Tab</div>
+    <div class="task-grid">
+      <div class="task-card priority-high">
+        <div class="task-icon" style="background:#faf5ff">🧩</div>
+        <div class="task-body">
+          <div class="task-title">Variants Tab — Create / Rename / Delete / Reweight</div>
+          <div class="task-desc">New "Variants" tab in Campaign Detail. Top section: variant cards in a row — each shows name, weight slider, lead count, reply rate. "Add Variant" button clones the existing sequence as a new variant (Variant B). Clicking a variant card opens its sequence editor below (same SequenceEditor component, just scoped to variant_id). Delete variant → confirm that assigned leads will be reassigned to control.</div>
+          <div class="ui-spec">
+            <div class="ui-spec-title">Variant Card</div>
+            <div class="spec-row"><div class="spec-key">Identifier</div><div>"A" / "B" / "C" letter badge + editable name</div></div>
+            <div class="spec-row"><div class="spec-key">Weight</div><div>Draggable handle that adjusts all variants in sync (sum = 100%)</div></div>
+            <div class="spec-row"><div class="spec-key">Stats</div><div>Leads assigned, emails sent, reply rate in compact chips</div></div>
+            <div class="spec-row"><div class="spec-key">Winner badge</div><div>Auto-shown when variant reaches 2× reply rate of control</div></div>
+          </div>
+          <div class="task-tags"><span class="tag tag-fe">Frontend</span><span class="tag tag-ux">UX</span><span class="tag tag-crit">Critical</span></div>
+        </div>
+      </div>
+      <div class="task-card priority-med">
+        <div class="task-icon" style="background:#eff6ff">📊</div>
+        <div class="task-body">
+          <div class="task-title">Analytics — Variant Comparison Table</div>
+          <div class="task-desc">In the Analytics tab, add a "Variants" section with a comparison table: variant name · leads assigned · emails sent · reply rate · open rate (if tracking on) · bounce rate. Bar chart comparing reply rates side by side. Statistical significance indicator: show "Need more data" when n &lt; 100 per variant, "Significant" when p &lt; 0.05.</div>
+          <div class="task-tags"><span class="tag tag-fe">Frontend</span><span class="tag tag-be">Backend</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-label">Sequence Editor Enhancements</div>
+    <div class="task-grid">
+      <div class="task-card priority-med">
+        <div class="task-icon" style="background:#fff7ed">📎</div>
+        <div class="task-body">
+          <div class="task-title">Attach Files to Sequence Steps</div>
+          <div class="task-desc">Add an "Attachments" section to each sequence step card. File upload (max 10MB per file, 3 files per step). Supported types: PDF, DOCX, PNG/JPG, XLSX. Files stored in object storage (S3/MinIO). On send, attach files as MIME multipart. Track attachment opens via download link in analytics if tracking is enabled. Per-step attachment list shows filename, size, and a remove button.</div>
+          <div class="callout warn">
+            <div class="callout-icon">⚠️</div>
+            <div>Attachments increase email size and may reduce deliverability. Show a warning banner when attachments are present: "Attachments may affect deliverability. Consider hosting files externally and linking instead."</div>
+          </div>
+          <div class="task-tags"><span class="tag tag-be">Backend</span><span class="tag tag-fe">Frontend</span><span class="tag tag-db">Storage</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- ───────────── PHASE 4 ───────────── -->
+  <div class="phase-section phase-p4" id="p4">
+    <div class="phase-header">
+      <div class="phase-badge"><span class="ph-num">04</span><span class="ph-label">Phase</span></div>
+      <div class="phase-info">
+        <div class="phase-name">Custom Email Providers · Google Workspace OAuth</div>
+        <div class="phase-desc">Expand beyond manual SMTP/IMAP credentials. Add OAuth2-based connection for Gmail personal and Google Workspace accounts. Support Microsoft 365 / Outlook via OAuth. Add provider detection and automatic SMTP/IMAP pre-fill.</div>
+        <div class="phase-duration">⏱ Weeks 7–10 · ~50h full-stack work</div>
+      </div>
+    </div>
+
+    <div class="section-label">Google Workspace / Gmail OAuth</div>
+    <div class="task-grid">
+      <div class="task-card priority-high">
+        <div class="task-icon" style="background:#eff6ff">🔑</div>
+        <div class="task-body">
+          <div class="task-title">Google OAuth2 Flow — Gmail API + SMTP Auth</div>
+          <div class="task-desc">Register a Google Cloud project with Gmail API + Google+ API scopes. Implement OAuth2 server-side flow: user clicks "Connect Gmail / Workspace" → redirect to Google consent → callback stores access_token + refresh_token (encrypted at rest). Use the OAuth token for SMTP AUTH XOAUTH2 (not App Passwords). Token auto-refresh via google-auth-library before each send batch.</div>
+          <div class="code-block"><span class="cmt"># Scopes needed</span>
+SCOPES = [
+    <span class="str">'https://mail.google.com/'</span>,  <span class="cmt"># SMTP + IMAP full access</span>
+    <span class="str">'https://www.googleapis.com/auth/userinfo.email'</span>
+]
+
+<span class="cmt"># OAuth flow in routes.py</span>
+<span class="kw">@router</span>.get(<span class="str">"/email-accounts/google/callback"</span>)
+<span class="kw">async</span> <span class="kw">def</span> <span class="fn">google_callback</span>(code: str, state: str, db=...):
+    creds = <span class="fn">exchange_code</span>(code)
+    <span class="fn">save_encrypted_tokens</span>(creds, user, db)</div>
+          <div class="task-tags"><span class="tag tag-be">Backend</span><span class="tag tag-cfg">Config</span><span class="tag tag-crit">Critical</span></div>
+        </div>
+      </div>
+      <div class="task-card priority-med">
+        <div class="task-icon" style="background:#f0fdf4">🏢</div>
+        <div class="task-body">
+          <div class="task-title">Google Workspace — Service Account for Delegated Access</div>
+          <div class="task-desc">For Workspace admins who want to send from multiple team emails (e.g. john@company.com, sales@company.com): support Google Workspace Service Account with domain-wide delegation. Admin uploads service account JSON → the app can impersonate any email in the domain. Show "Organisation account" badge in the email accounts list.</div>
+          <div class="task-tags"><span class="tag tag-be">Backend</span><span class="tag tag-cfg">Config</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-label">Microsoft 365 / Outlook Support</div>
+    <div class="task-grid">
+      <div class="task-card priority-med">
+        <div class="task-icon" style="background:#faf5ff">🪟</div>
+        <div class="task-body">
+          <div class="task-title">Microsoft OAuth2 — SMTP AUTH via MSAL</div>
+          <div class="task-desc">Register an Azure AD app with SMTP.Send + IMAP.AccessAsUser.All permissions. Implement OAuth2 PKCE flow using msal-python. Store tokens encrypted. Use Modern Auth (OAuth) for SMTP connection on smtp.office365.com:587. Auto-populate IMAP host: outlook.office365.com:993.</div>
+          <div class="task-tags"><span class="tag tag-be">Backend</span><span class="tag tag-cfg">Config</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-label">Provider-Aware Email Account Form</div>
+    <div class="task-grid">
+      <div class="task-card priority-high">
+        <div class="task-icon" style="background:#fff7ed">🧠</div>
+        <div class="task-body">
+          <div class="task-title">Smart Provider Detection + One-Click Connect</div>
+          <div class="task-desc">Replace the single Add Account form with a provider picker. Options: Gmail (OAuth → one-click), Google Workspace (OAuth or App Password), Outlook / 365 (OAuth), Yahoo (App Password), Custom SMTP (manual form). When user selects Gmail/Workspace/Outlook, show a single "Connect with Google / Microsoft" button. Only show the manual SMTP form for Custom. Auto-fill SMTP/IMAP fields from a provider presets map when email domain is recognised.</div>
+          <div class="ui-spec">
+            <div class="ui-spec-title">Provider Presets Map</div>
+            <div class="spec-row"><div class="spec-key">@gmail.com</div><div>smtp.gmail.com:587 TLS · imap.gmail.com:993 SSL</div></div>
+            <div class="spec-row"><div class="spec-key">@googlemail.com</div><div>same as Gmail</div></div>
+            <div class="spec-row"><div class="spec-key">@outlook.com / @hotmail.com</div><div>smtp.office365.com:587 · outlook.office365.com:993</div></div>
+            <div class="spec-row"><div class="spec-key">@yahoo.com</div><div>smtp.mail.yahoo.com:587 · imap.mail.yahoo.com:993</div></div>
+            <div class="spec-row"><div class="spec-key">Custom domain</div><div>Auto-lookup MX record via DNS API for hints</div></div>
+          </div>
+          <div class="task-tags"><span class="tag tag-fe">Frontend</span><span class="tag tag-be">Backend</span><span class="tag tag-ux">UX</span><span class="tag tag-crit">Critical</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-label">Security — Encrypted Credential Storage</div>
+    <div class="task-grid">
+      <div class="task-card priority-high">
+        <div class="task-icon" style="background:#fef2f2">🔒</div>
+        <div class="task-body">
+          <div class="task-title">Upgrade Encryption — Fernet → AES-256-GCM with Key Rotation</div>
+          <div class="task-desc">Current encryption.py uses basic Fernet. Upgrade to AES-256-GCM (via cryptography library) with a versioned key ID stored alongside each encrypted value. Add a key rotation CLI command that re-encrypts all credentials when the master key changes. Store master key in environment variable (or AWS KMS / Vault in production). Migration script for existing SMTP passwords.</div>
+          <div class="task-tags"><span class="tag tag-be">Backend</span><span class="tag tag-cfg">Security</span><span class="tag tag-crit">Critical</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- ───────────── PHASE 5 ───────────── -->
+  <div class="phase-section phase-p5" id="p5">
+    <div class="phase-header">
+      <div class="phase-badge"><span class="ph-num">05</span><span class="ph-label">Phase</span></div>
+      <div class="phase-info">
+        <div class="phase-name">Live Campaign Editing with Auto-Adjustment</div>
+        <div class="phase-desc">Allow full campaign settings editing after the campaign is active. Any change should intelligently cascade: reschedule pending emails, reallocate daily limits, reassign leads, rewrite sequences, and notify the user of what changed.</div>
+        <div class="phase-duration">⏱ Weeks 10–13 · ~55h full-stack work</div>
+      </div>
+    </div>
+
+    <div class="callout info">
+      <div class="callout-icon">ℹ️</div>
+      <div>This is the most complex phase. The key insight: every campaign setting change is a "delta event" that must be processed by the campaign engine asynchronously. Changes don't take effect in the current sending window — they apply from the next Celery beat cycle (typically within 5 minutes).</div>
+    </div>
+
+    <div class="section-label">Campaign Settings Panel (Always-Editable)</div>
+    <div class="task-grid">
+      <div class="task-card priority-high">
+        <div class="task-icon" style="background:#eff6ff">⚙️</div>
+        <div class="task-body">
+          <div class="task-title">Settings Tab — Full Edit Mode for Live Campaigns</div>
+          <div class="task-desc">Add a "Settings" tab to Campaign Detail (currently only editable pre-launch). All fields editable: name, daily limit, new leads/day, follow-up ratio, sending window, active days, timezone, tracking toggles. Each field shows its current value and has an Edit button. When editing, show a "Changes pending" banner. On Save, all changes go to a single PATCH endpoint.</div>
+          <div class="ui-spec">
+            <div class="ui-spec-title">Editable Settings Groups</div>
+            <div class="spec-row"><div class="spec-key">Volume</div><div>Daily email limit · New leads/day · Follow-up ratio</div></div>
+            <div class="spec-row"><div class="spec-key">Schedule</div><div>Sending window (start/end) · Active days · Timezone</div></div>
+            <div class="spec-row"><div class="spec-key">Deliverability</div><div>Track opens · Track clicks · Unsubscribe footer</div></div>
+            <div class="spec-row"><div class="spec-key">Sequence</div><div>Editable inline (existing SequenceEditor) — see cascade rules</div></div>
+          </div>
+          <div class="task-tags"><span class="tag tag-fe">Frontend</span><span class="tag tag-ux">UX</span><span class="tag tag-crit">Critical</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-label">Backend — Change Cascade Engine</div>
+    <div class="task-grid">
+      <div class="task-card priority-high">
+        <div class="task-icon" style="background:#f0fdf4">🔄</div>
+        <div class="task-body">
+          <div class="task-title">CampaignChangeEvent Table + Async Cascade Processor</div>
+          <div class="task-desc">When a PATCH to /campaigns/{id} is received while campaign is ACTIVE, record a CampaignChangeEvent (change_type, old_value, new_value, applied_at=None). A new Celery task <code>process_campaign_changes</code> runs every 5 minutes and applies pending changes. Each change type has a specific cascade handler (see below).</div>
+          <table class="schema-table">
+            <tr><th>Change Type</th><th>Cascade Action</th><th>Scope</th></tr>
+            <tr><td>daily_email_limit ↓</td><td>Cancel excess ScheduledEmails for today</td><td>Today only</td></tr>
+            <tr><td>daily_email_limit ↑</td><td>Allow more sends in next cycle</td><td>Next cycle</td></tr>
+            <tr><td>sending_window changed</td><td>Reschedule all SCHEDULED emails outside new window to next valid slot</td><td>All future</td></tr>
+            <tr><td>active_days changed</td><td>Cancel emails on newly-excluded days; reschedule to next active day</td><td>All future</td></tr>
+            <tr><td>timezone changed</td><td>Recalculate all future scheduled_for timestamps in new timezone</td><td>All future</td></tr>
+            <tr><td>sequence step edited</td><td>Apply to leads not yet reached that step; leave sent emails unchanged</td><td>Future steps only</td></tr>
+            <tr><td>sequence step deleted</td><td>Cancel any scheduled emails for that step</td><td>SCHEDULED only</td></tr>
+            <tr><td>track_opens toggled</td><td>Apply to all future sends (no change to past)</td><td>Future sends</td></tr>
+          </table>
+          <div class="task-tags"><span class="tag tag-be">Backend</span><span class="tag tag-db">DB</span><span class="tag tag-crit">Critical</span></div>
+        </div>
+      </div>
+      <div class="task-card priority-high">
+        <div class="task-icon" style="background:#fff7ed">📋</div>
+        <div class="task-body">
+          <div class="task-title">Change Impact Preview — Before User Saves</div>
+          <div class="task-desc">Before the user saves changes, show an "Impact Summary" modal: "Changing daily limit from 100→50 will cancel 47 scheduled emails. Changing sending window will reschedule 120 emails. These changes take effect in the next 5 minutes." Broken down by category. User can Cancel or Confirm. This prevents accidental large-scale disruption.</div>
+          <div class="task-tags"><span class="tag tag-fe">Frontend</span><span class="tag tag-be">Backend</span><span class="tag tag-ux">UX</span></div>
+        </div>
+      </div>
+      <div class="task-card priority-med">
+        <div class="task-icon" style="background:#f5f3ff">📜</div>
+        <div class="task-body">
+          <div class="task-title">Settings Change History Log</div>
+          <div class="task-desc">Show a "Change History" collapsible section at the bottom of the Settings tab. Each CampaignChangeEvent shown as a log entry: timestamp (IST) · changed_by (user email) · field · old value → new value · cascade result (e.g. "47 emails cancelled"). Helps debug unexpected campaign behaviour.</div>
+          <div class="task-tags"><span class="tag tag-fe">Frontend</span><span class="tag tag-be">Backend</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- ───────────── PHASE 6 ───────────── -->
+  <div class="phase-section phase-p6" id="p6">
+    <div class="phase-header">
+      <div class="phase-badge"><span class="ph-num">06</span><span class="ph-label">Phase</span></div>
+      <div class="phase-info">
+        <div class="phase-name">Advanced Filters, Export, Attachments & Polish</div>
+        <div class="phase-desc">Final polish pass: advanced lead export with filter composition, attachments in emails, UI micro-interaction polish, keyboard shortcuts, and performance optimisation.</div>
+        <div class="phase-duration">⏱ Weeks 13–18 · ~40h work</div>
+      </div>
+    </div>
+
+    <div class="section-label">Export Enhancements</div>
+    <div class="task-grid">
+      <div class="task-card priority-med">
+        <div class="task-icon" style="background:#eff6ff">📤</div>
+        <div class="task-body">
+          <div class="task-title">Export Filtered Leads — Saved Filter Presets</div>
+          <div class="task-desc">Export respects all active filters. Add "Save Filter" to name and persist filter sets (e.g. "Interested leads for follow-up", "Bounced leads for cleaning"). Saved filters appear as a dropdown above the table. Export formats: CSV (default) and XLSX. Export includes a metadata row: export date, campaign name, filters applied, total rows.</div>
+          <div class="task-tags"><span class="tag tag-fe">Frontend</span><span class="tag tag-be">Backend</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-label">Performance & DX</div>
+    <div class="task-grid">
+      <div class="task-card priority-med">
+        <div class="task-icon" style="background:#f0fdf4">⚡</div>
+        <div class="task-body">
+          <div class="task-title">Keyboard Shortcuts System</div>
+          <div class="task-desc">Global shortcuts: Cmd+K (search), Cmd+N (new campaign), Cmd+1/2/3 (switch nav), Escape (close modal/panel). Campaign detail shortcuts: G+L (go to leads), G+S (go to sequence), G+A (analytics). Sequence editor: Cmd+S (save), Cmd+Enter (add step). Show a keyboard shortcut legend on "?" press.</div>
+          <div class="task-tags"><span class="tag tag-fe">Frontend</span><span class="tag tag-ux">UX</span></div>
+        </div>
+      </div>
+      <div class="task-card priority-med">
+        <div class="task-icon" style="background:#faf5ff">🚀</div>
+        <div class="task-body">
+          <div class="task-title">API Response Caching + Optimistic UI</div>
+          <div class="task-desc">Add React Query for all API calls. Leads table: stale-while-revalidate with 30s TTL. Campaign stats: 60s TTL with background refetch. Optimistic updates for status changes (update UI immediately, rollback on error). Add loading skeletons for all data-loading states (replace "Loading..." text). Paginate leads API server-side (already 100/page on frontend — move filter to backend).</div>
+          <div class="task-tags"><span class="tag tag-fe">Frontend</span><span class="tag tag-be">Backend</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-label">Micro-Interaction Polish</div>
+    <div class="task-grid">
+      <div class="task-card priority-low">
+        <div class="task-icon" style="background:#fff7ed">✨</div>
+        <div class="task-body">
+          <div class="task-title">Transitions, Toast System, Empty States</div>
+          <div class="task-desc">Add page transition (100ms fade+slide). Global toast notification system (success/error/warning/info) that queues notifications, auto-dismisses in 4s, and stacks at bottom-right. Custom illustrated empty states for each page: no campaigns (rocket launching), no leads (import arrow), no activity (clock), no inbox (envelope). Progress animations on stats bar numbers (count-up on mount).</div>
+          <div class="task-tags"><span class="tag tag-fe">Frontend</span><span class="tag tag-ux">UX</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- ───────────── SUGGESTIONS ───────────── -->
+  <div style="margin-top: 48px;" id="suggestions">
+    <div style="font-size: 11px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; color: var(--ink-4); margin-bottom: 20px;">💡 Additional Suggestions Worth Considering</div>
+    <div class="suggestion-grid">
+      <div class="sug-card">
+        <div class="sug-emoji">🤖</div>
+        <div class="sug-title">AI Email Generator</div>
+        <div class="sug-body">Add an "AI Generate" button in the sequence step editor. User provides ICP (Ideal Customer Profile) + value prop → Claude generates subject + body with merge tags already inserted. Include tone selector (Professional / Casual / Direct).</div>
+      </div>
+      <div class="sug-card">
+        <div class="sug-emoji">🏥</div>
+        <div class="sug-title">Email Warmup Module</div>
+        <div class="sug-body">Auto-manage inbox warmup for new accounts. Send warmup emails between your own accounts at increasing volume (5→10→20→50/day over 3 weeks). Track warmup progress in a visual curve. Pause campaign sending until warmup is complete.</div>
+      </div>
+      <div class="sug-card">
+        <div class="sug-emoji">🔗</div>
+        <div class="sug-title">CRM Sync (HubSpot / Pipedrive)</div>
+        <div class="sug-body">Webhook-based sync: when a lead replies and is marked INTERESTED or MEETING_BOOKED, auto-create a contact + deal in HubSpot/Pipedrive. Pull existing contacts to avoid emailing people already in your CRM. Two-way status sync.</div>
+      </div>
+      <div class="sug-card">
+        <div class="sug-emoji">📞</div>
+        <div class="sug-title">Reply Intent Classification</div>
+        <div class="sug-body">Use an LLM to classify incoming replies: Interested / Not Interested / Out of Office / Question / Meeting Booked. Auto-update lead status. Reduce manual triage. Confidence score shown — below 80% goes to manual review queue.</div>
+      </div>
+      <div class="sug-card">
+        <div class="sug-emoji">🕐</div>
+        <div class="sug-title">Time-Zone Aware Sending</div>
+        <div class="sug-body">Detect recipient's timezone from their email domain's MX geography or a MaxMind lookup. Schedule emails to arrive during 9–11am in the recipient's local timezone regardless of your sending window. Significantly improves open rates.</div>
+      </div>
+      <div class="sug-card">
+        <div class="sug-emoji">🧪</div>
+        <div class="sug-title">Spam Score Checker</div>
+        <div class="sug-body">Before saving a sequence step, run the email body through a spam scoring API (SpamAssassin or similar). Show a score 0–10 with highlighted phrases that are hurting deliverability: "free", "guarantee", all-caps words, excessive exclamations.</div>
+      </div>
+      <div class="sug-card">
+        <div class="sug-emoji">📂</div>
+        <div class="sug-title">Multi-Tenant / Team Support</div>
+        <div class="sug-body">Add an Organisation model. Users belong to an org. Campaigns, leads, and email accounts scoped to org. Role-based access: Owner / Manager / Viewer. Managers can't delete campaigns. Viewers are read-only. Essential for agency or team use.</div>
+      </div>
+      <div class="sug-card">
+        <div class="sug-emoji">📱</div>
+        <div class="sug-title">Mobile PWA with Push Notifications</div>
+        <div class="sug-body">Register the app as a PWA. Add a service worker. Send push notifications for: new reply detected, bounce spike (>5% in 1h), daily sending summary. The inbox especially benefits from mobile — quick status updates on the go.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ───────────── QUICK REF ───────────── -->
+  <div style="margin-top: 48px;">
+    <div style="font-size: 11px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; color: var(--ink-4); margin-bottom: 16px;">📌 Quick Reference — New API Endpoints Summary</div>
+    <div class="code-block">
+<span class="cmt"># Phase 2</span>
+GET    /campaigns/{id}/leads/export?status=&search=&format=csv
+DELETE /campaigns/{id}/leads          (body: { lead_ids: [...] })
+GET    /campaigns/{id}/leads?status=&step=&search=&company=
+
+<span class="cmt"># Phase 3</span>
+GET    /campaigns/{id}/sequences              (returns all variants)
+POST   /campaigns/{id}/sequences              (create new variant)
+PATCH  /campaigns/{id}/sequences/{seq_id}    (update variant weight/name)
+DELETE /campaigns/{id}/sequences/{seq_id}    (delete variant, reassign leads)
+GET    /campaigns/{id}/analytics/variants    (per-variant stats)
+POST   /campaigns/{id}/sequences/{seq_id}/steps/{step_id}/attachments
+DELETE /campaigns/{id}/sequences/{seq_id}/steps/{step_id}/attachments/{att_id}
+
+<span class="cmt"># Phase 4</span>
+GET    /email-accounts/google/auth-url       (start OAuth2 flow)
+GET    /email-accounts/google/callback       (OAuth2 callback)
+GET    /email-accounts/microsoft/auth-url
+GET    /email-accounts/microsoft/callback
+POST   /email-accounts/{id}/test             (send test email to self)
+
+<span class="cmt"># Phase 5</span>
+GET    /campaigns/{id}/settings/change-preview   (dry-run impact)
+GET    /campaigns/{id}/settings/history          (change log)
+PATCH  /campaigns/{id}                           (now cascades changes)
+    </div>
+  </div>
+
+</div>
+
+<div class="footer">
+  ColdReach Platform — Engineering Roadmap · Generated May 2026 · IST (Asia/Kolkata)
+</div>
+
+</body>
+</html>
