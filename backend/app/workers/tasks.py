@@ -47,6 +47,11 @@ celery_app.conf.update(
             "task": "app.workers.tasks.run_daily_scheduler",
             "schedule": crontab(hour=0, minute=0),
         },
+        # Keep Render server active by pinging itself every 10 minutes
+        "keep-alive": {
+            "task": "app.workers.tasks.keep_alive",
+            "schedule": 600.0,
+        },
     },
 )
 
@@ -194,4 +199,35 @@ def process_campaign_changes():
         return {"processed": len(pending)}
     finally:
         db.close()
+
+
+@celery_app.task(name="app.workers.tasks.keep_alive")
+def keep_alive():
+    """
+    Send a GET request to the app's health endpoint to keep it awake on Render/hosting platforms.
+    """
+    import httpx
+    
+    url = settings.KEEP_ALIVE_URL or settings.RENDER_EXTERNAL_URL
+    if not url:
+        logger.info("No KEEP_ALIVE_URL or RENDER_EXTERNAL_URL set. Skipping keep-alive ping.")
+        return {"status": "skipped", "reason": "no_url"}
+        
+    # Standardize the protocol
+    if not url.startswith("http://") and not url.startswith("https://"):
+        url = "https://" + url
+        
+    # Ensure URL ends with a health check path
+    if not any(url.endswith(x) for x in ("/health", "/health/", "/api/health")):
+        url = url.rstrip("/") + "/health"
+        
+    try:
+        logger.info(f"Sending keep-alive ping to {url}")
+        response = httpx.get(url, timeout=10.0)
+        logger.info(f"Keep-alive response status code: {response.status_code}")
+        return {"status": "success", "status_code": response.status_code}
+    except Exception as e:
+        logger.error(f"Keep-alive ping failed: {e}")
+        return {"status": "failed", "error": str(e)}
+
 

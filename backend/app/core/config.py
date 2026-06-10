@@ -40,8 +40,13 @@ class Settings(BaseSettings):
     REPLY_CHECK_INTERVAL_MINUTES: int = 5
     SEND_CHECK_INTERVAL_SECONDS: int = 60
 
+    # Keep alive settings
+    RENDER_EXTERNAL_URL: Optional[str] = None
+    KEEP_ALIVE_URL: Optional[str] = None
+
     class Config:
         env_file = ".env"
 
 settings = Settings()
+
 
