@@ -57,7 +57,7 @@ def send_due_emails():
     Find all scheduled emails due now and send them.
     Respects: account daily limits, campaign active status.
     """
-    from app.models import ScheduledEmail, Lead, LeadStatus, EmailAccount, SequenceStep
+    from app.models import ScheduledEmail, Lead, LeadStatus, EmailAccount, SequenceStep, Campaign, CampaignStatus
     from app.services.email_sender import send_email_via_smtp
 
     db = SessionLocal()
@@ -73,13 +73,17 @@ def send_due_emails():
         sent_count = 0
 
         for se in due:
+            # Skip if campaign is not active (paused, draft, completed)
+            campaign = db.query(Campaign).get(se.campaign_id)
+            if not campaign or campaign.status != CampaignStatus.ACTIVE:
+                continue
+
             lead = db.query(Lead).get(se.lead_id)
             if not lead:
                 continue
 
-            # Skip if lead replied or unsubscribed
-           # Skip if lead replied or unsubscribed
-            if lead.status in (LeadStatus.REPLIED, LeadStatus.UNSUBSCRIBED, LeadStatus.BOUNCED):
+            # Skip if lead replied or has non-active status
+            if lead.status not in (LeadStatus.NEW, LeadStatus.CONTACTED, LeadStatus.OUT_OF_OFFICE):
                 se.is_cancelled = True
                 se.cancel_reason = f"lead_status_{lead.status}"
                 continue

@@ -18,12 +18,13 @@ from app.core.encryption import encrypt_password
 from app.models import (
     User, Campaign, Lead, LeadStatus, EmailAccount,
     Sequence, SequenceStep, Conversation, EmailEvent,
-    ScheduledEmail, CampaignEmailAccount, Attachment
+    ScheduledEmail, CampaignEmailAccount, Attachment,
+    EmailEventType
 )
 from app.schemas import (
     UserCreate, UserOut, Token,
-    CampaignCreate, CampaignUpdate, CampaignOut,
-    EmailAccountCreate, EmailAccountOut,
+    CampaignCreate, CampaignUpdate, CampaignOut, CampaignImportExport,
+    EmailAccountCreate, EmailAccountOut, EmailAccountUpdate, EmailAccountsBulkUpdate,
     SequenceCreate, SequenceOut,
     LeadCreate, LeadOut, LeadImportResult,
     ConversationOut, CampaignStats,
@@ -68,19 +69,51 @@ def me(current_user: User = Depends(get_current_user)):
 
 # ─── Campaigns ────────────────────────────────────────────────────────────────
 
+def _populate_campaign_metrics(db: Session, c: Campaign, out: CampaignOut):
+    from sqlalchemy import func
+    
+    out.lead_count = db.query(Lead).filter(Lead.campaign_id == c.id, Lead.is_deleted == False).count()
+    out.sent_count = db.query(EmailEvent).filter(
+        EmailEvent.campaign_id == c.id,
+        EmailEvent.event_type == EmailEventType.SENT
+    ).count()
+    out.reply_count = db.query(Lead).filter(
+        Lead.campaign_id == c.id,
+        Lead.replied_at != None,
+        Lead.is_deleted == False
+    ).count()
+
+    # Calculate progress percentage O(1) group by status
+    max_step = db.query(func.max(SequenceStep.step_number)).join(Sequence).filter(Sequence.campaign_id == c.id).scalar() or 1
+    
+    counts = db.query(Lead.status, Lead.current_step, func.count(Lead.id)).filter(
+        Lead.campaign_id == c.id, Lead.is_deleted == False
+    ).group_by(Lead.status, Lead.current_step).all()
+
+    total_leads = 0
+    total_progress = 0.0
+    for status, current_step, count in counts:
+        total_leads += count
+        if status == LeadStatus.NEW:
+            lead_prog = 0.0
+        elif status in (LeadStatus.CONTACTED, LeadStatus.OUT_OF_OFFICE):
+            lead_prog = min(current_step / max_step, 1.0)
+        else:
+            lead_prog = 1.0
+        
+        total_progress += lead_prog * count
+
+    out.progress_percentage = round((total_progress / total_leads * 100), 1) if total_leads > 0 else 0.0
+    return out
+
+
 @router.get("/campaigns", response_model=List[CampaignOut])
 def list_campaigns(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     campaigns = db.query(Campaign).filter(Campaign.owner_id == user.id).all()
     result = []
     for c in campaigns:
         out = CampaignOut.model_validate(c)
-        out.lead_count = db.query(Lead).filter(Lead.campaign_id == c.id).count()
-        out.sent_count = db.query(EmailEvent).filter(
-            EmailEvent.campaign_id == c.id
-        ).count()
-        out.reply_count = db.query(Lead).filter(
-            Lead.campaign_id == c.id, Lead.status == LeadStatus.REPLIED
-        ).count()
+        _populate_campaign_metrics(db, c, out)
         result.append(out)
     return result
 
@@ -118,7 +151,7 @@ def create_campaign(payload: CampaignCreate, db: Session = Depends(get_db), user
 def get_campaign(campaign_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     c = _get_campaign_or_404(db, campaign_id, user.id)
     out = CampaignOut.model_validate(c)
-    out.lead_count = db.query(Lead).filter(Lead.campaign_id == c.id).count()
+    _populate_campaign_metrics(db, c, out)
     return out
 
 
@@ -204,10 +237,114 @@ def update_campaign(campaign_id: int, payload: CampaignUpdate, db: Session = Dep
         from app.services.campaign_engine import _schedule_campaign_emails
         _schedule_campaign_emails(db, c)
 
+    # Cancel future scheduled emails if transitioning from ACTIVE to a non-active status (e.g., PAUSED)
+    if is_active and c.status != CampaignStatus.ACTIVE:
+        db.query(ScheduledEmail).filter(
+            ScheduledEmail.campaign_id == c.id,
+            ScheduledEmail.is_sent == False,
+            ScheduledEmail.is_cancelled == False
+        ).update({
+            ScheduledEmail.is_cancelled: True,
+            ScheduledEmail.cancel_reason: "campaign_paused"
+        }, synchronize_session=False)
+
+    db.commit()
+    db.refresh(c)
+    out = CampaignOut.model_validate(c)
+    _populate_campaign_metrics(db, c, out)
+    return out
+
+
+
+@router.get("/campaigns/{campaign_id}/export", response_model=CampaignImportExport)
+def export_campaign(campaign_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    c = _get_campaign_or_404(db, campaign_id, user.id)
+    
+    # Format settings
+    settings_data = {
+        "name": c.name,
+        "active_days": c.active_days,
+        "sending_window_start": c.sending_window_start,
+        "sending_window_end": c.sending_window_end,
+        "daily_new_leads": c.daily_new_leads,
+        "followup_percentage": c.followup_percentage,
+        "daily_email_limit": c.daily_email_limit,
+        "timezone": c.timezone,
+        "track_open_rate": c.track_open_rate,
+        "track_reply_rate": c.track_reply_rate,
+    }
+    
+    # Format sequences
+    sequences_data = []
+    for seq in c.sequences:
+        steps_data = []
+        for step in seq.steps:
+            steps_data.append({
+                "step_number": step.step_number,
+                "delay_days_min": step.delay_days_min,
+                "delay_days_max": step.delay_days_max,
+                "subject": step.subject,
+                "body": step.body,
+                "is_plain_text": step.is_plain_text,
+            })
+        sequences_data.append({
+            "name": seq.name,
+            "is_main_variant": seq.is_main_variant,
+            "variant_weight": seq.variant_weight,
+            "steps": steps_data,
+        })
+        
+    return {
+        "settings": settings_data,
+        "sequences": sequences_data,
+    }
+
+
+@router.post("/campaigns/import", response_model=CampaignOut, status_code=201)
+def import_campaign(payload: CampaignImportExport, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    # 1. Create Campaign
+    c = Campaign(
+        owner_id=user.id,
+        name=payload.settings.name,
+        active_days=payload.settings.active_days.model_dump(),
+        sending_window_start=payload.settings.sending_window_start,
+        sending_window_end=payload.settings.sending_window_end,
+        daily_new_leads=payload.settings.daily_new_leads,
+        followup_percentage=payload.settings.followup_percentage,
+        daily_email_limit=payload.settings.daily_email_limit,
+        timezone=payload.settings.timezone,
+        track_open_rate=payload.settings.track_open_rate,
+        track_reply_rate=payload.settings.track_reply_rate,
+    )
+    db.add(c)
+    db.flush()
+    
+    # 2. Create Sequences and SequenceSteps
+    for seq_in in payload.sequences:
+        seq = Sequence(
+            campaign_id=c.id,
+            name=seq_in.name,
+            is_main_variant=seq_in.is_main_variant,
+            variant_weight=seq_in.variant_weight,
+        )
+        db.add(seq)
+        db.flush()
+        
+        for step_in in seq_in.steps:
+            step = SequenceStep(
+                sequence_id=seq.id,
+                step_number=step_in.step_number,
+                delay_days_min=step_in.delay_days_min,
+                delay_days_max=step_in.delay_days_max,
+                subject=step_in.subject,
+                body=step_in.body,
+                is_plain_text=step_in.is_plain_text,
+            )
+            db.add(step)
+            
     db.commit()
     db.refresh(c)
     return CampaignOut.model_validate(c)
-
 
 
 @router.delete("/campaigns/{campaign_id}", status_code=204)
@@ -418,7 +555,7 @@ def get_lead_fields(campaign_id: int, db: Session = Depends(get_db), user: User 
     _get_campaign_or_404(db, campaign_id, user.id)
     standard = ["first_name", "last_name", "email", "company", "website"]
     # Collect custom field keys from up to 50 leads
-    leads = db.query(Lead).filter(Lead.campaign_id == campaign_id).limit(50).all()
+    leads = db.query(Lead).filter(Lead.campaign_id == campaign_id, Lead.is_deleted == False).limit(50).all()
     custom_keys = set()
     for lead in leads:
         if lead.custom_fields:
@@ -511,15 +648,29 @@ async def import_leads_csv(
                 errors += 1
                 continue
 
-            # Check duplicate
-            if db.query(Lead).filter(Lead.campaign_id == campaign_id, Lead.email == email).first():
-                duplicates += 1
-                continue
-
             custom = {
                 col: str(row[col]) for col in df.columns
                 if col not in standard_cols and pd.notna(row[col])
             }
+
+            # Check duplicate
+            existing_lead = db.query(Lead).filter(Lead.campaign_id == campaign_id, Lead.email == email).first()
+            if existing_lead:
+                if existing_lead.is_deleted:
+                    # Reactivate soft-deleted lead
+                    existing_lead.is_deleted = False
+                    existing_lead.status = LeadStatus.NEW
+                    existing_lead.current_step = 0
+                    existing_lead.first_name = str(row.get("first_name", "")) or None
+                    existing_lead.last_name = str(row.get("last_name", "")) or None
+                    existing_lead.company = str(row.get("company", "")) or None
+                    existing_lead.website = str(row.get("website", "")) or None
+                    existing_lead.custom_fields = custom
+                    db.add(existing_lead)
+                    imported += 1
+                else:
+                    duplicates += 1
+                continue
 
             lead = Lead(
                 campaign_id=campaign_id,
@@ -558,6 +709,7 @@ def list_accounts(db: Session = Depends(get_db), user: User = Depends(get_curren
 
 @router.post("/email-accounts", response_model=EmailAccountOut, status_code=201)
 def add_account(payload: EmailAccountCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    is_warming = payload.is_warming_up or False
     account = EmailAccount(
         owner_id=user.id,
         name=payload.name,
@@ -571,10 +723,139 @@ def add_account(payload: EmailAccountCreate, db: Session = Depends(get_db), user
         imap_port=payload.imap_port,
         imap_use_ssl=payload.imap_use_ssl,
         daily_limit=payload.daily_limit,
+        is_warming_up=is_warming,
+        health_status="WARMING" if is_warming else "HEALTHY",
+        warmup_start_date=datetime.utcnow().strftime("%Y-%m-%d") if is_warming else None,
+        warmup_day_number=1 if is_warming else 1,
     )
     db.add(account)
     db.commit()
     db.refresh(account)
+    return account
+
+
+@router.patch("/email-accounts/bulk")
+def bulk_update_accounts(
+    payload: EmailAccountsBulkUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user)
+):
+    accounts = db.query(EmailAccount).filter(
+        EmailAccount.id.in_(payload.account_ids),
+        EmailAccount.owner_id == user.id
+    ).all()
+
+    if not accounts:
+        raise HTTPException(404, "No matching email accounts found")
+
+    needs_reschedule = False
+    updated_count = 0
+
+    for account in accounts:
+        account_changed = False
+        
+        if payload.daily_limit is not None and account.daily_limit != payload.daily_limit:
+            account.daily_limit = payload.daily_limit
+            account_changed = True
+            
+        if payload.is_active is not None and account.is_active != payload.is_active:
+            account.is_active = payload.is_active
+            account_changed = True
+            
+        if payload.is_warming_up is not None and account.is_warming_up != payload.is_warming_up:
+            account.is_warming_up = payload.is_warming_up
+            account_changed = True
+            if payload.is_warming_up:
+                account.health_status = "WARMING"
+                if not account.warmup_start_date:
+                    account.warmup_start_date = datetime.utcnow().strftime("%Y-%m-%d")
+                    account.warmup_day_number = 1
+            else:
+                account.health_status = "HEALTHY"
+
+        if account_changed:
+            needs_reschedule = True
+            updated_count += 1
+
+    if updated_count > 0:
+        db.commit()
+
+        if needs_reschedule:
+            from app.models import CampaignEmailAccount, Campaign, CampaignStatus
+            from app.services.campaign_engine import recalculate_campaign_schedule
+            
+            assignments = db.query(CampaignEmailAccount).filter(
+                CampaignEmailAccount.email_account_id.in_(payload.account_ids),
+                CampaignEmailAccount.is_active == True
+            ).all()
+            
+            campaign_ids = {a.campaign_id for a in assignments}
+            
+            for cid in campaign_ids:
+                campaign = db.query(Campaign).get(cid)
+                if campaign and campaign.status == CampaignStatus.ACTIVE:
+                    try:
+                        recalculate_campaign_schedule(db, campaign.id)
+                    except Exception:
+                        pass
+
+    return {"message": f"Successfully updated {updated_count} email accounts", "updated_count": updated_count}
+
+
+@router.patch("/email-accounts/{account_id}", response_model=EmailAccountOut)
+def update_account(
+    account_id: int,
+    payload: EmailAccountUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user)
+):
+    account = db.query(EmailAccount).filter(
+        EmailAccount.id == account_id, EmailAccount.owner_id == user.id
+    ).first()
+    if not account:
+        raise HTTPException(404, "Email account not found")
+        
+    needs_reschedule = False
+    for field, value in payload.model_dump(exclude_none=True).items():
+        if field in ("is_active", "daily_limit", "is_warming_up", "warmup_start_date"):
+            if getattr(account, field) != value:
+                needs_reschedule = True
+ 
+        if field == "smtp_password":
+            account.smtp_password_encrypted = encrypt_password(value)
+        elif field == "is_warming_up":
+            account.is_warming_up = value
+            if value:
+                account.health_status = "WARMING"
+                if not account.warmup_start_date:
+                    account.warmup_start_date = datetime.utcnow().strftime("%Y-%m-%d")
+                    account.warmup_day_number = 1
+            else:
+                # If warm up is turned off, reset health_status to HEALTHY
+                account.health_status = "HEALTHY"
+        else:
+            setattr(account, field, value)
+            
+    db.commit()
+    db.refresh(account)
+ 
+    if needs_reschedule:
+        from app.models import CampaignEmailAccount, Campaign, CampaignStatus
+        from app.services.campaign_engine import recalculate_campaign_schedule
+        
+        assignments = db.query(CampaignEmailAccount).filter(
+            CampaignEmailAccount.email_account_id == account.id,
+            CampaignEmailAccount.is_active == True
+        ).all()
+        
+        for assignment in assignments:
+            campaign = db.query(Campaign).get(assignment.campaign_id)
+            if campaign and campaign.status == CampaignStatus.ACTIVE:
+                try:
+                    recalculate_campaign_schedule(db, campaign.id)
+                except Exception as e:
+                    pass
+ 
     return account
 
 
@@ -585,8 +866,42 @@ def delete_account(account_id: int, db: Session = Depends(get_db), user: User = 
     ).first()
     if not account:
         raise HTTPException(404, "Account not found")
+        
+    from app.models import CampaignEmailAccount, ScheduledEmail, EmailEvent, Campaign, CampaignStatus
+    from app.services.campaign_engine import recalculate_campaign_schedule
+    
+    # 1. Find assigned campaigns
+    assignments = db.query(CampaignEmailAccount).filter(
+        CampaignEmailAccount.email_account_id == account.id
+    ).all()
+    campaign_ids = [a.campaign_id for a in assignments]
+    
+    # 2. Delete campaign assignments
+    db.query(CampaignEmailAccount).filter(
+        CampaignEmailAccount.email_account_id == account.id
+    ).delete()
+    
+    # 3. Nullify references in events and queues to avoid ForeignKey constraints
+    db.query(ScheduledEmail).filter(ScheduledEmail.email_account_id == account.id).update(
+        {ScheduledEmail.email_account_id: None}, synchronize_session=False
+    )
+    db.query(EmailEvent).filter(EmailEvent.email_account_id == account.id).update(
+        {EmailEvent.email_account_id: None}, synchronize_session=False
+    )
+    
+    # 4. Delete the email account
     db.delete(account)
     db.commit()
+    
+    # 5. Reschedule active campaigns that were using this account
+    for cid in campaign_ids:
+        campaign = db.query(Campaign).get(cid)
+        if campaign and campaign.status == CampaignStatus.ACTIVE:
+            try:
+                recalculate_campaign_schedule(db, campaign.id)
+            except Exception as e:
+                pass
+
 
 
 @router.get("/campaigns/{campaign_id}/email-accounts")
@@ -831,7 +1146,7 @@ def delete_sequence(campaign_id: int, seq_id: int, db: Session = Depends(get_db)
 @router.get("/inbox", response_model=List[ConversationOut])
 def get_inbox(
     skip: int = 0,
-    limit: int = 50,
+    limit: int = 1000,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user)
 ):
@@ -897,17 +1212,20 @@ def reply_to_conversation(
 def campaign_stats(campaign_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     _get_campaign_or_404(db, campaign_id, user.id)
 
-    total = db.query(Lead).filter(Lead.campaign_id == campaign_id).count()
-    contacted = db.query(Lead).filter(Lead.campaign_id == campaign_id, Lead.status == LeadStatus.CONTACTED).count()
-    replied = db.query(Lead).filter(Lead.campaign_id == campaign_id, Lead.status == LeadStatus.REPLIED).count()
-    bounced = db.query(Lead).filter(Lead.campaign_id == campaign_id, Lead.status == LeadStatus.BOUNCED).count()
-    sent = db.query(EmailEvent).filter(EmailEvent.campaign_id == campaign_id).count()
+    total = db.query(Lead).filter(Lead.campaign_id == campaign_id, Lead.is_deleted == False).count()
+    contacted = db.query(Lead).filter(Lead.campaign_id == campaign_id, Lead.contacted_at != None, Lead.is_deleted == False).count()
+    replied = db.query(Lead).filter(Lead.campaign_id == campaign_id, Lead.replied_at != None, Lead.is_deleted == False).count()
+    bounced = db.query(Lead).filter(Lead.campaign_id == campaign_id, Lead.status == LeadStatus.BOUNCED, Lead.is_deleted == False).count()
+    sent = db.query(EmailEvent).filter(
+        EmailEvent.campaign_id == campaign_id,
+        EmailEvent.event_type == EmailEventType.SENT
+    ).count()
     pending = db.query(ScheduledEmail).filter(
         ScheduledEmail.campaign_id == campaign_id,
         ScheduledEmail.is_sent == False,
         ScheduledEmail.is_cancelled == False,
     ).count()
-    reply_rate = round((replied / max(contacted + replied, 1)) * 100, 1)
+    reply_rate = round((replied / max(contacted, 1)) * 100, 1)
 
     return CampaignStats(
         total_leads=total,
@@ -1074,11 +1392,11 @@ def get_campaign_analytics(
     _get_campaign_or_404(db, campaign_id, user.id)
 
     # ── Overall stats ────────────────────────────────────────────────────────
-    total_leads     = db.query(Lead).filter(Lead.campaign_id == campaign_id).count()
-    new_leads       = db.query(Lead).filter(Lead.campaign_id == campaign_id, Lead.status == LeadStatus.NEW).count()
-    contacted       = db.query(Lead).filter(Lead.campaign_id == campaign_id, Lead.status == LeadStatus.CONTACTED).count()
-    replied         = db.query(Lead).filter(Lead.campaign_id == campaign_id, Lead.status == LeadStatus.REPLIED).count()
-    bounced         = db.query(Lead).filter(Lead.campaign_id == campaign_id, Lead.status == LeadStatus.BOUNCED).count()
+    total_leads     = db.query(Lead).filter(Lead.campaign_id == campaign_id, Lead.is_deleted == False).count()
+    new_leads       = db.query(Lead).filter(Lead.campaign_id == campaign_id, Lead.status == LeadStatus.NEW, Lead.is_deleted == False).count()
+    contacted       = db.query(Lead).filter(Lead.campaign_id == campaign_id, Lead.contacted_at != None, Lead.is_deleted == False).count()
+    replied         = db.query(Lead).filter(Lead.campaign_id == campaign_id, Lead.replied_at != None, Lead.is_deleted == False).count()
+    bounced         = db.query(Lead).filter(Lead.campaign_id == campaign_id, Lead.status == LeadStatus.BOUNCED, Lead.is_deleted == False).count()
 
     sent_count      = db.query(EmailEvent).filter(EmailEvent.campaign_id == campaign_id, EmailEvent.event_type == EmailEventType.SENT).count()
     failed_count    = db.query(EmailEvent).filter(EmailEvent.campaign_id == campaign_id, EmailEvent.event_type == EmailEventType.FAILED).count()
@@ -1223,9 +1541,8 @@ def update_lead_status(
     lead.status_changed_by = "user"
     lead.status_note = payload.get("note", f"Manually set to {new_status}")
 
-    # Auto-cancel follow-ups for terminal states
-    terminal = {"NOT_INTERESTED", "DO_NOT_CONTACT", "WRONG_PERSON", "BOUNCED", "UNSUBSCRIBED"}
-    if new_status in terminal:
+    # Auto-cancel follow-ups if status changes to any non-active state
+    if new_status not in (LeadStatus.NEW, LeadStatus.CONTACTED, LeadStatus.OUT_OF_OFFICE):
         from app.services.campaign_engine import cancel_pending_emails_for_lead
         cancel_pending_emails_for_lead(db, lead.id, reason=f"manual_{new_status.lower()}")
 
@@ -1401,6 +1718,7 @@ def leads_by_status(
         count = db.query(Lead).filter(
             Lead.campaign_id == campaign_id,
             Lead.status == status,
+            Lead.is_deleted == False,
         ).count()
         if count > 0:
             result[status.value] = count

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 
 const API = import.meta.env.VITE_API_URL || "http://localhost:8000/api";
@@ -274,6 +274,44 @@ function CampaignList({ onSelect, onNew }) {
     }
   };
 
+  const handleExportCampaign = async (c) => {
+    try {
+      const data = await api("GET", `/campaigns/${c.id}/export`);
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${c.name.toLowerCase().replace(/[^a-z0-9]+/g, "_")}_campaign_export.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      alert("Failed to export campaign: " + err.message);
+    }
+  };
+
+  const handleImportCampaign = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      try {
+        const payload = JSON.parse(evt.target.result);
+        if (!payload.settings || !payload.sequences) {
+          throw new Error("Invalid campaign export file format. Missing settings or sequences.");
+        }
+        const campaign = await api("POST", "/campaigns/import", payload);
+        load();
+        onSelect(campaign);
+      } catch (err) {
+        alert("Failed to import campaign: " + err.message);
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = null;
+  };
+
   if (loading) return <div className="p-8 text-slate-500 font-semibold">Loading campaigns...</div>;
 
   return (
@@ -283,10 +321,23 @@ function CampaignList({ onSelect, onNew }) {
           <h2 className="text-2xl font-bold text-slate-900">Outreach Campaigns</h2>
           <p className="text-slate-500 text-xs mt-1">Manage and track your email marketing sequences</p>
         </div>
-        <Button onClick={onNew}>
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" /></svg>
-          New Campaign
-        </Button>
+        <div className="flex gap-2">
+          <input
+            type="file"
+            id="import-campaign-file"
+            accept=".json"
+            className="hidden"
+            onChange={handleImportCampaign}
+          />
+          <Button variant="secondary" onClick={() => document.getElementById("import-campaign-file").click()}>
+            <svg className="w-4 h-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
+            Import JSON
+          </Button>
+          <Button onClick={onNew}>
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" /></svg>
+            New Campaign
+          </Button>
+        </div>
       </div>
 
       {campaigns.length === 0 ? (
@@ -328,6 +379,18 @@ function CampaignList({ onSelect, onNew }) {
                       <button
                         onClick={async (e) => {
                           e.stopPropagation();
+                          handleExportCampaign(c);
+                        }}
+                        className="p-2 rounded-lg border border-slate-200 text-slate-400 hover:text-indigo-600 hover:border-indigo-100 hover:bg-indigo-50 transition-all active:scale-[0.98]"
+                        title="Export campaign configuration (JSON)"
+                      >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                        </svg>
+                      </button>
+                      <button
+                        onClick={async (e) => {
+                          e.stopPropagation();
                           if (confirm(`Are you sure you want to permanently delete the campaign "${c.name}"? This will delete all sequences, leads, history logs, and scheduled emails. This action is irreversible.`)) {
                             await api("DELETE", `/campaigns/${c.id}`);
                             load();
@@ -343,7 +406,6 @@ function CampaignList({ onSelect, onNew }) {
                     </div>
                   </div>
 
-                  {/* Lead metrics */}
                   <div className="grid grid-cols-3 gap-2 text-center py-3 bg-slate-50/80 rounded-xl border border-slate-100/50 mb-4">
                     <div>
                       <p className="text-base font-extrabold text-slate-800">{c.lead_count ?? 0}</p>
@@ -490,6 +552,50 @@ function NewCampaignForm({ onCreated, onCancel }) {
                 autoFocus
               />
             </div>
+
+            <div className="border-t border-slate-100 my-5 pt-5">
+              <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 block">Or Import from Campaign JSON</label>
+              <div className="flex items-center gap-3">
+                <input
+                  type="file"
+                  id="import-campaign-form-file"
+                  accept=".json"
+                  className="hidden"
+                  onChange={async (e) => {
+                    const file = e.target.files[0];
+                    if (!file) return;
+                    const reader = new FileReader();
+                    reader.onload = async (evt) => {
+                      try {
+                        const payload = JSON.parse(evt.target.result);
+                        if (!payload.settings || !payload.sequences) {
+                          throw new Error("Invalid campaign export file format.");
+                        }
+                        setLoading(true);
+                        const campaign = await api("POST", "/campaigns/import", payload);
+                        onCreated(campaign);
+                      } catch (err) {
+                        alert("Failed to import campaign: " + err.message);
+                      } finally {
+                        setLoading(false);
+                      }
+                    };
+                    reader.readAsText(file);
+                    e.target.value = null;
+                  }}
+                />
+                <Button 
+                  type="button" 
+                  variant="secondary" 
+                  className="w-full flex justify-center py-4 border-dashed border-2 border-slate-200 hover:border-indigo-400 hover:bg-indigo-50/10 text-slate-600 transition-all font-semibold"
+                  onClick={() => document.getElementById("import-campaign-form-file").click()}
+                >
+                  <svg className="w-5 h-5 mr-2 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
+                  Choose Campaign JSON File
+                </Button>
+              </div>
+            </div>
+
             <div className="flex justify-end border-t border-slate-100 pt-4">
               <Button type="button" onClick={() => setStep(1)} className="px-5">
                 Next: Limits
@@ -665,14 +771,80 @@ function NewCampaignForm({ onCreated, onCancel }) {
 }
 
 // ─── Variable Autocomplete Textarea ──────────────────────────────────────────
-function VarTextarea({ value, onChange, availableFields, placeholder, rows = 6, label }) {
+function VarTextarea({ value, onChange, availableFields, placeholder, rows = 6, label, isPlainText = true }) {
   const [suggestion, setSuggestion] = useState(null); // {fields, pos, query}
   const [selectedIdx, setSelectedIdx] = useState(0);
-  const textareaRef = useCallback(node => { if (node) node._ref = node; }, []);
-  const containerRef = useCallback(node => { if (node) node._ref = node; }, []);
-  const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0 });
-  const taRef = useState(null);
   const [ta, setTa] = useState(null);
+  const editorRef = useRef(null);
+
+  // Sync outer value updates to rich text editor innerHTML only if different
+  useEffect(() => {
+    if (!isPlainText && editorRef.current && editorRef.current.innerHTML !== value) {
+      editorRef.current.innerHTML = value || "";
+    }
+  }, [value, isPlainText]);
+
+  const handleInput = () => {
+    if (editorRef.current) {
+      let html = editorRef.current.innerHTML;
+      if (html === "<br>" || html === "<div><br></div>" || html === "<p><br></p>" || html.trim() === "") {
+        html = "";
+      }
+      onChange(html);
+    }
+  };
+
+  const handleToolbarClick = (e, command, arg = null) => {
+    e.preventDefault();
+    if (editorRef.current) {
+      editorRef.current.focus();
+    }
+    if (command === "createLink") {
+      const url = prompt("Enter URL:", "https://");
+      if (url) {
+        document.execCommand("createLink", false, url);
+      }
+    } else {
+      document.execCommand(command, false, arg);
+    }
+    handleInput();
+  };
+
+  const insertVariable = (field) => {
+    if (isPlainText) {
+      if (!ta) return;
+      const val = ta.value;
+      const pos = ta.selectionStart;
+      const insert = `{{${field}}}`;
+      const newVal = val.slice(0, pos) + insert + val.slice(pos);
+      onChange(newVal);
+      setTimeout(() => {
+        ta.focus();
+        ta.setSelectionRange(pos + insert.length, pos + insert.length);
+      }, 0);
+    } else {
+      if (!editorRef.current) return;
+      editorRef.current.focus();
+      const varText = `{{${field}}}`;
+      const sel = window.getSelection();
+      if (sel.rangeCount > 0) {
+        const range = sel.getRangeAt(0);
+        if (editorRef.current.contains(range.commonAncestorContainer)) {
+          range.deleteContents();
+          const textNode = document.createTextNode(varText);
+          range.insertNode(textNode);
+          range.setStartAfter(textNode);
+          range.setEndAfter(textNode);
+          sel.removeAllRanges();
+          sel.addRange(range);
+          handleInput();
+          return;
+        }
+      }
+      editorRef.current.innerHTML += varText;
+      handleInput();
+    }
+  };
 
   const handleChange = (e) => {
     const val = e.target.value;
@@ -696,78 +868,169 @@ function VarTextarea({ value, onChange, availableFields, placeholder, rows = 6, 
     }
   };
 
-  const insertVariable = (field) => {
-    if (!ta || !suggestion) return;
-    const val = ta.value;
-    // Find {{ before cursor
-    const before = val.slice(0, suggestion.cursorPos);
-    const matchIdx = before.lastIndexOf("{{");
-    const newVal = val.slice(0, matchIdx) + `{{${field}}}` + val.slice(suggestion.cursorPos);
-    onChange(newVal);
-    setSuggestion(null);
-    setTimeout(() => {
-      ta.focus();
-      const pos = matchIdx + field.length + 4;
-      ta.setSelectionRange(pos, pos);
-    }, 0);
-  };
-
   const handleKeyDown = (e) => {
     if (!suggestion) return;
     if (e.key === "ArrowDown") { e.preventDefault(); setSelectedIdx(i => Math.min(i + 1, suggestion.fields.length - 1)); }
     if (e.key === "ArrowUp") { e.preventDefault(); setSelectedIdx(i => Math.max(i - 1, 0)); }
-    if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); insertVariable(suggestion.fields[selectedIdx]); }
+    if (e.key === "Enter" || e.key === "Tab") {
+      e.preventDefault();
+      const field = suggestion.fields[selectedIdx];
+      const val = ta.value;
+      const before = val.slice(0, suggestion.cursorPos);
+      const matchIdx = before.lastIndexOf("{{");
+      const newVal = val.slice(0, matchIdx) + `{{${field}}}` + val.slice(suggestion.cursorPos);
+      onChange(newVal);
+      setSuggestion(null);
+      setTimeout(() => {
+        ta.focus();
+        const pos = matchIdx + field.length + 4;
+        ta.setSelectionRange(pos, pos);
+      }, 0);
+    }
     if (e.key === "Escape") setSuggestion(null);
   };
 
+  const isEmpty = !value || value === "<br>" || value === "<div><br></div>" || value === "<p><br></p>";
+
   return (
     <div className="flex flex-col gap-1 relative">
-      {label && <label className="text-sm font-medium text-gray-700">{label}</label>}
-      <div className="relative">
-        <textarea
-          ref={node => setTa(node)}
-          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 min-h-[120px] resize-y font-mono"
-          rows={rows}
-          value={value}
-          onChange={handleChange}
-          onKeyDown={handleKeyDown}
-          onBlur={() => setTimeout(() => setSuggestion(null), 150)}
-          placeholder={placeholder}
-        />
-        {suggestion && (
-          <div className="absolute z-50 bg-white border border-gray-200 rounded-lg shadow-xl w-64 max-h-48 overflow-y-auto"
-            style={{ top: "100%", left: 0, marginTop: 2 }}>
-            <div className="px-3 py-1.5 text-xs text-gray-400 border-b border-gray-100 font-medium">
-              Variables — press Tab or Enter to insert
+      {label && <label className="text-sm font-semibold text-slate-700">{label}</label>}
+      
+      {isPlainText ? (
+        <div className="relative">
+          <textarea
+            ref={node => setTa(node)}
+            className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 min-h-[120px] resize-y font-mono bg-white shadow-sm leading-relaxed"
+            rows={rows}
+            value={value}
+            onChange={handleChange}
+            onKeyDown={handleKeyDown}
+            onBlur={() => setTimeout(() => setSuggestion(null), 150)}
+            placeholder={placeholder}
+          />
+          {suggestion && (
+            <div className="absolute z-50 bg-white border border-slate-200 rounded-xl shadow-xl w-64 max-h-48 overflow-y-auto"
+              style={{ top: "100%", left: 0, marginTop: 2 }}>
+              <div className="px-3.5 py-2 border-b border-slate-100 text-xs text-slate-400 font-semibold">
+                Variables — press Tab or Enter to insert
+              </div>
+              {suggestion.fields.map((f, i) => (
+                <button
+                  key={f}
+                  type="button"
+                  onMouseDown={() => {
+                    const field = f;
+                    const val = ta.value;
+                    const before = val.slice(0, ta.selectionStart);
+                    const matchIdx = before.lastIndexOf("{{");
+                    const newVal = val.slice(0, matchIdx) + `{{${field}}}` + val.slice(ta.selectionStart);
+                    onChange(newVal);
+                    setSuggestion(null);
+                    setTimeout(() => {
+                      ta.focus();
+                      const pos = matchIdx + field.length + 4;
+                      ta.setSelectionRange(pos, pos);
+                    }, 0);
+                  }}
+                  className={`w-full text-left px-3.5 py-2 text-sm flex items-center gap-2 transition-colors ${i === selectedIdx ? "bg-slate-900 text-white" : "hover:bg-slate-50 text-slate-700"}`}
+                >
+                  <span className="font-mono text-xs opacity-60">{"{{"}</span>
+                  <span className="font-medium">{f}</span>
+                  <span className="font-mono text-xs opacity-60">{"}}"}</span>
+                </button>
+              ))}
             </div>
-            {suggestion.fields.map((f, i) => (
-              <button
-                key={f}
-                type="button"
-                onMouseDown={() => insertVariable(f)}
-                className={`w-full text-left px-3 py-2 text-sm flex items-center gap-2 transition-colors ${i === selectedIdx ? "bg-gray-900 text-white" : "hover:bg-gray-50 text-gray-700"}`}
-              >
-                <span className="font-mono text-xs opacity-60">{"{{"}</span>
-                <span className="font-medium">{f}</span>
-                <span className="font-mono text-xs opacity-60">{"}}"}</span>
-              </button>
-            ))}
+          )}
+        </div>
+      ) : (
+        <div className="border border-slate-200 rounded-xl overflow-hidden focus-within:ring-2 focus-within:ring-indigo-500/20 focus-within:border-indigo-500 bg-white shadow-sm transition-all">
+          {/* Rich Editor Toolbar */}
+          <div className="flex items-center flex-wrap gap-0.5 p-1.5 bg-slate-50 border-b border-slate-200 select-none">
+            <button
+              type="button"
+              onMouseDown={e => handleToolbarClick(e, "bold")}
+              className="p-1 h-7 min-w-[28px] hover:bg-slate-200 rounded text-slate-700 flex items-center justify-center font-bold text-xs transition-colors"
+              title="Bold"
+            >
+              B
+            </button>
+            <button
+              type="button"
+              onMouseDown={e => handleToolbarClick(e, "italic")}
+              className="p-1 h-7 min-w-[28px] hover:bg-slate-200 rounded text-slate-700 flex items-center justify-center italic font-bold text-xs transition-colors"
+              title="Italic"
+            >
+              I
+            </button>
+            <button
+              type="button"
+              onMouseDown={e => handleToolbarClick(e, "underline")}
+              className="p-1 h-7 min-w-[28px] hover:bg-slate-200 rounded text-slate-700 flex items-center justify-center underline font-bold text-xs transition-colors"
+              title="Underline"
+            >
+              U
+            </button>
+            <div className="w-[1px] h-4 bg-slate-200 mx-1" />
+            <button
+              type="button"
+              onMouseDown={e => handleToolbarClick(e, "insertUnorderedList")}
+              className="p-1 h-7 min-w-[28px] hover:bg-slate-200 rounded text-slate-700 flex items-center justify-center transition-colors"
+              title="Bullet List"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16M4 6h.01M4 12h.01M4 18h.01" /></svg>
+            </button>
+            <button
+              type="button"
+              onMouseDown={e => handleToolbarClick(e, "createLink")}
+              className="p-1 h-7 min-w-[28px] hover:bg-slate-200 rounded text-slate-700 flex items-center justify-center transition-colors"
+              title="Insert Link"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.2}><path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
+            </button>
+            <button
+              type="button"
+              onMouseDown={e => handleToolbarClick(e, "unlink")}
+              className="p-1 h-7 min-w-[28px] hover:bg-slate-200 rounded text-slate-700 flex items-center justify-center transition-colors"
+              title="Remove Link"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.2}><path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636" /></svg>
+            </button>
+            <div className="w-[1px] h-4 bg-slate-200 mx-1" />
+            <button
+              type="button"
+              onMouseDown={e => handleToolbarClick(e, "removeFormat")}
+              className="p-1 h-7 min-w-[28px] hover:bg-slate-200 rounded text-slate-700 flex items-center justify-center text-xs font-bold transition-colors"
+              title="Clear Formatting"
+            >
+              Tx
+            </button>
           </div>
-        )}
-      </div>
+          {/* Editable Div Container */}
+          <div className="relative min-h-[150px]">
+            <div
+              ref={editorRef}
+              contentEditable
+              onInput={handleInput}
+              onBlur={handleInput}
+              className="w-full px-3.5 py-2.5 text-sm focus:outline-none min-h-[150px] overflow-y-auto leading-relaxed font-sans bg-white rich-editor-content"
+            />
+            {isEmpty && (
+              <div className="absolute top-2.5 left-3.5 text-sm text-slate-400 pointer-events-none select-none">
+                {placeholder}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {availableFields.length > 0 && (
         <div className="flex flex-wrap gap-1 mt-1">
           {availableFields.map(f => (
             <button
               key={f}
               type="button"
-              onClick={() => {
-                const insert = `{{${f}}}`;
-                const pos = ta ? ta.selectionStart : value.length;
-                const newVal = value.slice(0, pos) + insert + value.slice(pos);
-                onChange(newVal);
-                setTimeout(() => { if (ta) { ta.focus(); ta.setSelectionRange(pos + insert.length, pos + insert.length); } }, 0);
-              }}
+              onMouseDown={e => e.preventDefault()}
+              onClick={() => insertVariable(f)}
               className="px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded text-xs font-mono hover:bg-blue-100 transition-colors"
             >
               {`{{${f}}}`}
@@ -792,6 +1055,100 @@ function resolveSpyntax(text) {
     });
   } while (text !== prev);
   return text;
+}
+
+// Convert HTML to clean plain text
+function htmlToPlainText(html) {
+  if (!html) return "";
+  try {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, "text/html");
+    let text = "";
+
+    const traverse = (node) => {
+      if (node.nodeType === 3) { // Text Node
+        text += node.textContent;
+      } else if (node.nodeType === 1) { // Element Node
+        const tagName = node.tagName.toLowerCase();
+        if (tagName === "br") {
+          text += "\n";
+        } else if (tagName === "a") {
+          const href = node.getAttribute("href");
+          if (href && !href.startsWith("javascript:")) {
+            const tempText = node.textContent.trim();
+            if (tempText && tempText !== href) {
+              text += `${tempText} (${href})`;
+            } else {
+              text += href;
+            }
+          } else {
+            for (let i = 0; i < node.childNodes.length; i++) {
+              traverse(node.childNodes[i]);
+            }
+          }
+        } else if (tagName === "p" || tagName === "div" || tagName === "h1" || tagName === "h2" || tagName === "h3" || tagName === "h4" || tagName === "h5" || tagName === "h6" || tagName === "li") {
+          if (text && !text.endsWith("\n")) {
+            text += "\n";
+          }
+          for (let i = 0; i < node.childNodes.length; i++) {
+            traverse(node.childNodes[i]);
+          }
+          if (!text.endsWith("\n")) {
+            text += "\n";
+          }
+        } else {
+          for (let i = 0; i < node.childNodes.length; i++) {
+            traverse(node.childNodes[i]);
+          }
+        }
+      }
+    };
+
+    for (let i = 0; i < doc.body.childNodes.length; i++) {
+      traverse(doc.body.childNodes[i]);
+    }
+
+    // Replace non-breaking spaces with normal spaces
+    text = text.replace(/\u00a0/g, " ");
+    
+    // Clean up duplicate newlines (max 2 consecutive newlines)
+    text = text.replace(/\n{3,}/g, "\n\n");
+    return text.trim();
+  } catch (e) {
+    console.error("DOMParser error in htmlToPlainText:", e);
+    let tmp = html.replace(/<br\s*\/?>/gi, "\n");
+    tmp = tmp.replace(/<\/p>|<\/div>/gi, "\n");
+    tmp = tmp.replace(/<[^>]+>/g, "");
+    const entities = {
+      "&nbsp;": " ",
+      "&lt;": "<",
+      "&gt;": ">",
+      "&amp;": "&",
+      "&quot;": '"',
+      "&#39;": "'",
+      "&apos;": "'"
+    };
+    for (const [entity, replacement] of Object.entries(entities)) {
+      tmp = tmp.replaceAll(entity, replacement);
+    }
+    return tmp.trim();
+  }
+}
+
+// Convert plain text to simple HTML wrapping
+function plainTextToHtml(text) {
+  if (!text) return "";
+  const escaped = text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
+  return escaped
+    .split("\n")
+    .map(line => line.trim() === "" ? "<div><br></div>" : `<div>${line}</div>`)
+    .join("");
 }
 
 // ─── Merge-tag renderer ───────────────────────────────────────────────────────
@@ -899,13 +1256,23 @@ function SequencePreview({ steps, leads, onClose }) {
                     </div>
                   </div>
                   {/* Email body */}
-                  <div className="p-4 bg-white">
-                    {step.body
-                      ? <div className="text-sm text-gray-800 whitespace-pre-wrap font-mono leading-relaxed">
-                        <HighlightedPreview text={renderTemplate(step.body, previewLead)} raw={step.body} />
-                      </div>
-                      : <p className="text-gray-400 text-sm italic">(no body)</p>
-                    }
+                  <div className="p-4 bg-white border border-slate-100 rounded-lg">
+                    {step.body ? (
+                      step.is_plain_text ? (
+                        <div className="text-sm text-slate-800 whitespace-pre-wrap font-sans leading-relaxed">
+                          <HighlightedPreview text={renderTemplate(step.body, previewLead)} raw={step.body} />
+                        </div>
+                      ) : (
+                        <div 
+                          className="text-sm text-slate-800 preview-html-body font-sans leading-relaxed"
+                          dangerouslySetInnerHTML={{
+                            __html: renderTemplate(step.body, previewLead)
+                          }}
+                        />
+                      )
+                    ) : (
+                      <p className="text-gray-400 text-sm italic">(no body)</p>
+                    )}
                   </div>
                 </div>
               </div>
@@ -1935,7 +2302,30 @@ function CampaignSettingsTab({ campaign, onSaved, onDeleted }) {
             </div>
           </div>
 
-          <div className="flex justify-end pt-3">
+          <div className="flex justify-between items-center pt-3">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={async () => {
+                try {
+                  const data = await api("GET", `/campaigns/${campaign.id}/export`);
+                  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+                  const url = URL.createObjectURL(blob);
+                  const link = document.createElement("a");
+                  link.href = url;
+                  link.download = `${campaign.name.toLowerCase().replace(/[^a-z0-9]+/g, "_")}_campaign_export.json`;
+                  document.body.appendChild(link);
+                  link.click();
+                  document.body.removeChild(link);
+                  URL.revokeObjectURL(url);
+                } catch (err) {
+                  alert("Failed to export campaign: " + err.message);
+                }
+              }}
+            >
+              <svg className="w-4 h-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+              Export Campaign (JSON)
+            </Button>
             <Button type="submit" disabled={saving}>{saving ? "Checking Impact..." : "Save Settings Changes"}</Button>
           </div>
         </Card>
@@ -2512,11 +2902,38 @@ function CampaignDetail({ campaign, onBack }) {
             totalLeads={leads.length}
             filteredCount={filteredLeads.length}
           />
+          {selectedLeads.size > 0 && filteredLeads.length > pagedLeads.length && (
+            <div className="bg-indigo-50 border border-indigo-100 p-3 rounded-xl text-xs font-semibold text-indigo-800 flex items-center justify-between mb-4 animate-fade-in">
+              <span>
+                {selectedLeads.size === filteredLeads.length 
+                  ? `All ${filteredLeads.length} leads in this campaign are selected.` 
+                  : `${selectedLeads.size} leads on this page are selected.`
+                }
+              </span>
+              {selectedLeads.size !== filteredLeads.length ? (
+                <button 
+                  type="button"
+                  onClick={() => setSelectedLeads(new Set(filteredLeads.map(l => l.id)))}
+                  className="underline text-indigo-600 hover:text-indigo-900 cursor-pointer bg-transparent border-none font-bold outline-none"
+                >
+                  Select all {filteredLeads.length} leads in this campaign
+                </button>
+              ) : (
+                <button 
+                  type="button"
+                  onClick={() => setSelectedLeads(new Set())}
+                  className="underline text-indigo-600 hover:text-indigo-900 cursor-pointer bg-transparent border-none font-bold outline-none"
+                >
+                  Clear selection
+                </button>
+              )}
+            </div>
+          )}
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
-              <label className="flex items-center gap-2 text-sm">
+              <label className="flex items-center gap-2 text-sm font-semibold text-slate-600 cursor-pointer">
                 <input type="checkbox"
-                  checked={selectedLeads.size > 0 && selectedLeads.size === pagedLeads.length}
+                  checked={selectedLeads.size > 0 && (selectedLeads.size === pagedLeads.length || selectedLeads.size === filteredLeads.length)}
                   onChange={e => {
                     if (e.target.checked) {
                       setSelectedLeads(new Set(pagedLeads.map(l => l.id)));
@@ -2524,6 +2941,7 @@ function CampaignDetail({ campaign, onBack }) {
                       setSelectedLeads(new Set());
                     }
                   }}
+                  className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500/20 w-4 h-4 cursor-pointer"
                 />
                 Select Page
               </label>
@@ -3167,7 +3585,15 @@ function SequenceVariantsManager({ campaignId, sequences, leads, availableFields
                 </div>
                 <div className="flex items-center gap-2">
                   <label className="flex items-center gap-1.5 text-xs text-gray-600">
-                    <input type="checkbox" checked={step.is_plain_text} onChange={e => updateStep(i, "is_plain_text", e.target.checked)} />
+                    <input
+                      type="checkbox"
+                      checked={step.is_plain_text}
+                      onChange={e => {
+                        const isPlain = e.target.checked;
+                        const newBody = isPlain ? htmlToPlainText(step.body) : plainTextToHtml(step.body);
+                        setSteps(steps.map((s, idx) => idx === i ? { ...s, is_plain_text: isPlain, body: newBody } : s));
+                      }}
+                    />
                     Plain text
                   </label>
                   {steps.length > 1 && (
@@ -3194,6 +3620,7 @@ function SequenceVariantsManager({ campaignId, sequences, leads, availableFields
                   availableFields={availableFields}
                   placeholder={`Email body — type {{ to insert a variable`}
                   rows={8}
+                  isPlainText={step.is_plain_text}
                 />
 
                 {/* Attachments */}
@@ -3647,13 +4074,53 @@ function EmailAccounts() {
     name: "", email: "", smtp_host: "", smtp_port: 587,
     smtp_username: "", smtp_password: "", use_tls: true,
     imap_host: "", imap_port: 993, imap_use_ssl: true, daily_limit: 50,
+    is_warming_up: false,
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [testingConnection, setTestingConnection] = useState(false);
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [showBulkModal, setShowBulkModal] = useState(false);
+  const [bulkForm, setBulkForm] = useState({
+    daily_limit: 50,
+    is_active: true,
+    is_warming_up: false,
+    update_limit: false,
+    update_active: false,
+    update_warming: false,
+  });
 
   const load = () => api("GET", "/email-accounts/availability").then(setAccounts);
   useEffect(() => { load(); }, []);
+
+  const handleBulkUpdate = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    const payload = { account_ids: selectedIds };
+    if (bulkForm.update_limit) payload.daily_limit = +bulkForm.daily_limit;
+    if (bulkForm.update_active) payload.is_active = bulkForm.is_active;
+    if (bulkForm.update_warming) payload.is_warming_up = bulkForm.is_warming_up;
+
+    try {
+      await api("PATCH", "/email-accounts/bulk", payload);
+      setSelectedIds([]);
+      setShowBulkModal(false);
+      load();
+      alert("Email accounts updated successfully!");
+    } catch (err) {
+      alert("Bulk update failed: " + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSelectAll = (e) => {
+    if (e.target.checked) {
+      setSelectedIds(accounts.map(a => a.id));
+    } else {
+      setSelectedIds([]);
+    }
+  };
 
   const handleOAuth = async (prov) => {
     setShowPicker(false);
@@ -3743,6 +4210,7 @@ function EmailAccounts() {
         name: "", email: "", smtp_host: "", smtp_port: 587,
         smtp_username: "", smtp_password: "", use_tls: true,
         imap_host: "", imap_port: 993, imap_use_ssl: true, daily_limit: 50,
+        is_warming_up: false,
       });
       load();
     } catch (err) {
@@ -3864,7 +4332,7 @@ function EmailAccounts() {
 
             <div className="grid grid-cols-2 gap-4">
               <Input label="Daily Sending Limit" type="number" min={1} max={500} value={form.daily_limit} onChange={e => setForm({ ...form, daily_limit: +e.target.value })} />
-              <div className="flex items-end gap-6 pb-2">
+              <div className="flex items-end gap-4 pb-2 flex-wrap">
                 <label className="flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer">
                   <input type="checkbox" checked={form.use_tls} onChange={e => setForm({ ...form, use_tls: e.target.checked })} className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500/20 w-4 h-4" />
                   Use TLS (SMTP)
@@ -3872,6 +4340,10 @@ function EmailAccounts() {
                 <label className="flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer">
                   <input type="checkbox" checked={form.imap_use_ssl} onChange={e => setForm({ ...form, imap_use_ssl: e.target.checked })} className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500/20 w-4 h-4" />
                   Use SSL (IMAP)
+                </label>
+                <label className="flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer">
+                  <input type="checkbox" checked={form.is_warming_up} onChange={e => setForm({ ...form, is_warming_up: e.target.checked })} className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500/20 w-4 h-4" />
+                  Warming Up
                 </label>
               </div>
             </div>
@@ -3884,6 +4356,59 @@ function EmailAccounts() {
         </Card>
       )}
 
+      {selectedIds.length > 0 && (
+        <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4 mb-6 flex items-center justify-between shadow-sm animate-fade-in">
+          <div className="flex items-center gap-3">
+            <span className="text-sm font-semibold text-indigo-900">
+              Selected {selectedIds.length} of {accounts.length} account{selectedIds.length !== 1 ? 's' : ''}
+            </span>
+          </div>
+          <div className="flex items-center gap-3">
+            <Button
+              size="sm"
+              variant="primary"
+              onClick={() => {
+                const firstSelected = accounts.find(a => a.id === selectedIds[0]);
+                if (firstSelected) {
+                  setBulkForm({
+                    daily_limit: firstSelected.daily_limit,
+                    is_active: firstSelected.is_active,
+                    is_warming_up: firstSelected.is_warming_up,
+                    update_limit: false,
+                    update_active: false,
+                    update_warming: false,
+                  });
+                }
+                setShowBulkModal(true);
+              }}
+            >
+              ⚙️ Bulk Update Settings
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => setSelectedIds([])}
+            >
+              Clear Selection
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {accounts.length > 0 && (
+        <div className="flex items-center justify-between mb-3 px-1">
+          <label className="flex items-center gap-2 text-xs font-bold text-slate-500 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={accounts.length > 0 && selectedIds.length === accounts.length}
+              onChange={handleSelectAll}
+              className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500/20 w-4 h-4 cursor-pointer"
+            />
+            Select All Accounts ({accounts.length})
+          </label>
+        </div>
+      )}
+
       <div className="flex flex-col gap-3">
         {accounts.map(a => {
           const healthColors = {
@@ -3894,51 +4419,203 @@ function EmailAccounts() {
           };
           const usedPct = Math.round((a.emails_sent_today / a.daily_limit) * 100);
           return (
-            <Card key={a.id} className="p-5">
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold text-slate-800 text-sm">{a.name}</span>
-                    {a.provider === "google" && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-100">OAuth: Google</span>}
-                    {a.provider === "microsoft" && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-100">OAuth: Microsoft</span>}
-                    {(!a.provider || a.provider === "custom") && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-50 text-slate-600 border border-slate-200">Custom SMTP</span>}
+            <Card key={a.id} className="p-5 flex gap-4 items-start">
+              <input
+                type="checkbox"
+                checked={selectedIds.includes(a.id)}
+                onChange={() => {
+                  setSelectedIds(prev =>
+                    prev.includes(a.id)
+                      ? prev.filter(id => id !== a.id)
+                      : [...prev, a.id]
+                  );
+                }}
+                className="mt-1 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500/20 w-4 h-4 cursor-pointer flex-shrink-0"
+              />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-slate-800 text-sm">{a.name}</span>
+                      {a.provider === "google" && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-100">OAuth: Google</span>}
+                      {a.provider === "microsoft" && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-100">OAuth: Microsoft</span>}
+                      {(!a.provider || a.provider === "custom") && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-50 text-slate-600 border border-slate-200">Custom SMTP</span>}
+                    </div>
+                    <span className="text-slate-400 text-xs font-semibold font-mono block mt-1">{a.email}</span>
                   </div>
-                  <span className="text-slate-400 text-xs font-semibold font-mono block mt-1">{a.email}</span>
+                  <div className="flex items-center gap-3">
+                    <label className="flex items-center gap-1.5 text-xs text-slate-500 font-semibold cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={a.is_warming_up}
+                        onChange={async (e) => {
+                          try {
+                            await api("PATCH", `/email-accounts/${a.id}`, { is_warming_up: e.target.checked });
+                            load();
+                          } catch (err) {
+                            alert("Failed to toggle warm-up mode: " + err.message);
+                          }
+                        }}
+                        className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500/20 w-3.5 h-3.5 cursor-pointer"
+                      />
+                      Warming Up
+                    </label>
+                    <Badge color={healthColors[a.health_status] || "gray"}>
+                      {a.health_status || "HEALTHY"}
+                    </Badge>
+                    <span className="text-xs font-semibold text-slate-500">{a.emails_sent_today}/{a.daily_limit} sent today</span>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      className="text-xs border-rose-100 text-rose-600 hover:bg-rose-50"
+                      onClick={async () => {
+                        if (confirm(`Are you sure you want to disconnect and delete the account: ${a.email}?`)) {
+                          await api("DELETE", `/email-accounts/${a.id}`);
+                          load();
+                        }
+                      }}
+                    >
+                      Disconnect
+                    </Button>
+                  </div>
                 </div>
-                <div className="flex items-center gap-3">
-                  <Badge color={healthColors[a.health_status] || "gray"}>
-                    {a.health_status || "HEALTHY"}
-                  </Badge>
-                  <span className="text-xs font-semibold text-slate-500">{a.emails_sent_today}/{a.daily_limit} sent today</span>
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    className="text-xs border-rose-100 text-rose-600 hover:bg-rose-50"
-                    onClick={async () => {
-                      if (confirm(`Are you sure you want to disconnect and delete the account: ${a.email}?`)) {
-                        await api("DELETE", `/email-accounts/${a.id}`);
-                        load();
-                      }
-                    }}
-                  >
-                    Disconnect
-                  </Button>
-                </div>
-              </div>
-              <div className="mt-3.5">
-                <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                  <div
-                    className={`h-full rounded-full transition-all ${usedPct >= 90 ? "bg-rose-500" :
-                      usedPct >= 70 ? "bg-amber-500" : "bg-emerald-500"
-                      }`}
-                    style={{ width: `${Math.min(usedPct, 100)}%` }}
-                  />
+                <div className="mt-3.5">
+                  <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all ${usedPct >= 90 ? "bg-rose-500" :
+                        usedPct >= 70 ? "bg-amber-500" : "bg-emerald-500"
+                        }`}
+                      style={{ width: `${Math.min(usedPct, 100)}%` }}
+                    />
+                  </div>
                 </div>
               </div>
             </Card>
           );
         })}
       </div>
+
+      {showBulkModal && createPortal(
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 border border-slate-100">
+            <div className="flex items-center justify-between mb-4 pb-2 border-b border-slate-100">
+              <h3 className="font-bold text-slate-900 text-base">Bulk Update Settings</h3>
+              <button onClick={() => setShowBulkModal(false)} className="text-slate-400 hover:text-slate-700 text-lg font-bold">✕</button>
+            </div>
+
+            <p className="text-xs text-slate-400 mb-5">
+              Select which settings to update for the {selectedIds.length} selected accounts.
+            </p>
+
+            <form onSubmit={handleBulkUpdate} className="space-y-5">
+              <div className="border border-slate-100 rounded-xl p-4 bg-slate-50/50">
+                <label className="flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer mb-2">
+                  <input
+                    type="checkbox"
+                    checked={bulkForm.update_limit}
+                    onChange={e => setBulkForm({ ...bulkForm, update_limit: e.target.checked })}
+                    className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500/20 w-4 h-4 cursor-pointer"
+                  />
+                  Update Daily Sending Limit
+                </label>
+                {bulkForm.update_limit && (
+                  <Input
+                    type="number"
+                    min={1}
+                    max={500}
+                    value={bulkForm.daily_limit}
+                    onChange={e => setBulkForm({ ...bulkForm, daily_limit: +e.target.value })}
+                    className="mt-1"
+                    required
+                  />
+                )}
+              </div>
+
+              <div className="border border-slate-100 rounded-xl p-4 bg-slate-50/50">
+                <label className="flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer mb-2">
+                  <input
+                    type="checkbox"
+                    checked={bulkForm.update_active}
+                    onChange={e => setBulkForm({ ...bulkForm, update_active: e.target.checked })}
+                    className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500/20 w-4 h-4 cursor-pointer"
+                  />
+                  Update Active / Disabled Status
+                </label>
+                {bulkForm.update_active && (
+                  <div className="flex gap-4 mt-2 pl-6">
+                    <label className="flex items-center gap-2 text-xs font-semibold text-slate-600 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="bulk_active"
+                        checked={bulkForm.is_active === true}
+                        onChange={() => setBulkForm({ ...bulkForm, is_active: true })}
+                        className="text-indigo-600 focus:ring-indigo-500/20"
+                      />
+                      Active (Enable)
+                    </label>
+                    <label className="flex items-center gap-2 text-xs font-semibold text-slate-600 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="bulk_active"
+                        checked={bulkForm.is_active === false}
+                        onChange={() => setBulkForm({ ...bulkForm, is_active: false })}
+                        className="text-indigo-600 focus:ring-indigo-500/20"
+                      />
+                      Disabled (Pause)
+                    </label>
+                  </div>
+                )}
+              </div>
+
+              <div className="border border-slate-100 rounded-xl p-4 bg-slate-50/50">
+                <label className="flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer mb-2">
+                  <input
+                    type="checkbox"
+                    checked={bulkForm.update_warming}
+                    onChange={e => setBulkForm({ ...bulkForm, update_warming: e.target.checked })}
+                    className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500/20 w-4 h-4 cursor-pointer"
+                  />
+                  Update Warm-up Mode
+                </label>
+                {bulkForm.update_warming && (
+                  <div className="flex gap-4 mt-2 pl-6">
+                    <label className="flex items-center gap-2 text-xs font-semibold text-slate-600 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="bulk_warming"
+                        checked={bulkForm.is_warming_up === true}
+                        onChange={() => setBulkForm({ ...bulkForm, is_warming_up: true })}
+                        className="text-indigo-600 focus:ring-indigo-500/20"
+                      />
+                      Enable Warm-up
+                    </label>
+                    <label className="flex items-center gap-2 text-xs font-semibold text-slate-600 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="bulk_warming"
+                        checked={bulkForm.is_warming_up === false}
+                        onChange={() => setBulkForm({ ...bulkForm, is_warming_up: false })}
+                        className="text-indigo-600 focus:ring-indigo-500/20"
+                      />
+                      Disable Warm-up
+                    </label>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex justify-end gap-3 border-t border-slate-100 pt-4">
+                <Button type="button" variant="secondary" onClick={() => setShowBulkModal(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={loading || (!bulkForm.update_limit && !bulkForm.update_active && !bulkForm.update_warming)}>
+                  {loading ? "Updating..." : "Apply Changes"}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
 }
@@ -3946,23 +4623,118 @@ function EmailAccounts() {
 // ─── Master Inbox ─────────────────────────────────────────────────────────────
 function Inbox() {
   const [conversations, setConversations] = useState([]);
+  const [campaigns, setCampaigns] = useState([]);
   const [selected, setSelected] = useState(null);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
-  const [filter, setFilter] = useState("all"); // all | unread | replied
+  const [filter, setFilter] = useState("all"); // all | unread | replied | interested | starred | opted_out
+  const [selectedCampaignId, setSelectedCampaignId] = useState(null);
+  const [sortBy, setSortBy] = useState("newest"); // newest | oldest
 
   const [replyBody, setReplyBody] = useState("");
   const [sending, setSending] = useState(false);
 
+  // Starring system (local persistence)
+  const [starredIds, setStarredIds] = useState(() => {
+    try {
+      const saved = localStorage.getItem("cr_starred_conversations");
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
   useEffect(() => {
-    api("GET", "/inbox").then(setConversations).finally(() => setLoading(false));
+    localStorage.setItem("cr_starred_conversations", JSON.stringify(starredIds));
+  }, [starredIds]);
+
+  const toggleStar = (convId, e) => {
+    e.stopPropagation();
+    setStarredIds(prev =>
+      prev.includes(convId) ? prev.filter(id => id !== convId) : [...prev, convId]
+    );
+  };
+
+  // Draft recovery (local persistence)
+  const getDraft = (convId) => {
+    try {
+      return localStorage.getItem(`cr_draft_${convId}`) || "";
+    } catch {
+      return "";
+    }
+  };
+
+  const saveDraft = (convId, text) => {
+    try {
+      if (text) {
+        localStorage.setItem(`cr_draft_${convId}`, text);
+      } else {
+        localStorage.removeItem(`cr_draft_${convId}`);
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleReplyBodyChange = (text) => {
+    setReplyBody(text);
+    if (selected) {
+      saveDraft(selected.id, text);
+    }
+  };
+
+  // Collapsible lead details (local persistence with responsive default)
+  const [showDetails, setShowDetails] = useState(() => {
+    try {
+      const val = localStorage.getItem("cr_inbox_show_details");
+      if (val !== null) return val !== "false";
+      // Responsive default: collapse on medium/tablet viewports, open on wide screens
+      return window.innerWidth >= 1280;
+    } catch {
+      return true;
+    }
+  });
+
+  const toggleDetails = () => {
+    setShowDetails(prev => {
+      localStorage.setItem("cr_inbox_show_details", !prev);
+      return !prev;
+    });
+  };
+
+  // Lead custom note & status updates
+  const [noteText, setNoteText] = useState("");
+  const [savingNote, setSavingNote] = useState(false);
+
+  useEffect(() => {
+    setLoading(true);
+    Promise.all([
+      api("GET", "/inbox"),
+      api("GET", "/campaigns")
+    ]).then(([inboxData, campaignData]) => {
+      setConversations(inboxData);
+      setCampaigns(campaignData);
+    }).catch(err => {
+      console.error(err);
+    }).finally(() => setLoading(false));
   }, []);
 
   const openConversation = async (conv) => {
-    setReplyBody("");
-    const full = await api("GET", `/inbox/${conv.id}`);
-    setSelected(full);
-    setConversations(cs => cs.map(c => c.id === conv.id ? { ...c, has_unread: false } : c));
+    if (selected) {
+      saveDraft(selected.id, replyBody);
+    }
+    const draft = getDraft(conv.id);
+    setReplyBody(draft);
+    setNoteText("");
+
+    try {
+      const full = await api("GET", `/inbox/${conv.id}`);
+      setSelected(full);
+      setNoteText(full.lead?.status_note || "");
+      setConversations(cs => cs.map(c => c.id === conv.id ? { ...c, has_unread: false } : c));
+    } catch (e) {
+      alert("Failed to load conversation: " + e.message);
+    }
   };
 
   const handleSendReply = async () => {
@@ -3971,6 +4743,7 @@ function Inbox() {
     try {
       await api("POST", `/inbox/${selected.id}/reply`, { body: replyBody });
       setReplyBody("");
+      saveDraft(selected.id, ""); // clear draft
       const full = await api("GET", `/inbox/${selected.id}`);
       setSelected(full);
       const feed = await api("GET", "/inbox");
@@ -3980,6 +4753,72 @@ function Inbox() {
     } finally {
       setSending(false);
     }
+  };
+
+  const handleUpdateStatus = async (newStatus) => {
+    if (!selected) return;
+    try {
+      const res = await api("PATCH", `/campaigns/${selected.campaign_id}/leads/${selected.lead.id}/status`, {
+        status: newStatus,
+        note: noteText || `Status updated via Inbox to ${newStatus}`
+      });
+
+      setSelected(curr => ({
+        ...curr,
+        lead: {
+          ...curr.lead,
+          status: res.status,
+          status_note: res.status_note
+        }
+      }));
+
+      setConversations(cs => cs.map(c =>
+        c.lead?.id === selected.lead.id
+          ? { ...c, lead: { ...c.lead, status: res.status } }
+          : c
+      ));
+    } catch (e) {
+      alert("Failed to update status: " + e.message);
+    }
+  };
+
+  const handleSaveNote = async () => {
+    if (!selected) return;
+    setSavingNote(true);
+    try {
+      const res = await api("PATCH", `/campaigns/${selected.campaign_id}/leads/${selected.lead.id}/status`, {
+        status: selected.lead.status,
+        note: noteText
+      });
+      setSelected(curr => ({
+        ...curr,
+        lead: {
+          ...curr.lead,
+          status_note: res.status_note
+        }
+      }));
+      alert("Note saved successfully!");
+    } catch (e) {
+      alert("Failed to save note: " + e.message);
+    } finally {
+      setSavingNote(false);
+    }
+  };
+
+  const insertVariable = (variable) => {
+    const textarea = document.getElementById("inbox-composer-textarea");
+    if (!textarea) return;
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const text = textarea.value;
+    const before = text.substring(0, start);
+    const after = text.substring(end, text.length);
+    const newText = before + `{${variable}}` + after;
+    handleReplyBodyChange(newText);
+    setTimeout(() => {
+      textarea.focus();
+      textarea.selectionStart = textarea.selectionEnd = start + variable.length + 2;
+    }, 0);
   };
 
   const getInitials = (lead) => {
@@ -4013,14 +4852,75 @@ function Inbox() {
     return d.toLocaleDateString([], { month: "short", day: "numeric" });
   };
 
+  // Helper for message snippet preview
+  const getSnippet = (c) => {
+    const lastMsg = c.messages && c.messages.length > 0
+      ? c.messages[c.messages.length - 1]
+      : null;
+    if (!lastMsg) return c.lead?.company || c.lead?.email || "";
+    const prefix = lastMsg.direction === "OUTBOUND" ? "You: " : "";
+    return `${prefix}${lastMsg.body}`;
+  };
+
+  // Folder and Campaign Filtering logic
   const filtered = conversations.filter(c => {
     const name = `${c.lead?.first_name || ""} ${c.lead?.last_name || ""} ${c.lead?.email || ""} ${c.lead?.company || ""}`.toLowerCase();
     const matchSearch = name.includes(search.toLowerCase());
-    const matchFilter = filter === "all" || (filter === "unread" && c.has_unread) || (filter === "replied" && c.lead?.status === "REPLIED");
-    return matchSearch && matchFilter;
+
+    const matchCampaign = selectedCampaignId === null || c.campaign_id === selectedCampaignId;
+
+    let matchFilter = true;
+    if (filter === "unread") {
+      matchFilter = c.has_unread;
+    } else if (filter === "replied") {
+      matchFilter = ["REPLIED", "INTERESTED", "MEETING_BOOKED", "OUT_OF_OFFICE"].includes(c.lead?.status);
+    } else if (filter === "interested") {
+      matchFilter = ["INTERESTED", "MEETING_BOOKED"].includes(c.lead?.status);
+    } else if (filter === "starred") {
+      matchFilter = starredIds.includes(c.id);
+    } else if (filter === "opted_out") {
+      matchFilter = ["UNSUBSCRIBED", "DO_NOT_CONTACT", "NOT_INTERESTED", "WRONG_PERSON", "BOUNCED"].includes(c.lead?.status);
+    }
+
+    return matchSearch && matchCampaign && matchFilter;
   });
 
+  const sortedConversations = [...filtered].sort((a, b) => {
+    const timeA = new Date(a.last_message_at || 0).getTime();
+    const timeB = new Date(b.last_message_at || 0).getTime();
+    return sortBy === "newest" ? timeB - timeA : timeA - timeB;
+  });
+
+  // Folder Counts
+  const allCount = conversations.length;
   const unreadCount = conversations.filter(c => c.has_unread).length;
+  const repliedCount = conversations.filter(c => ["REPLIED", "INTERESTED", "MEETING_BOOKED", "OUT_OF_OFFICE"].includes(c.lead?.status)).length;
+  const interestedCount = conversations.filter(c => ["INTERESTED", "MEETING_BOOKED"].includes(c.lead?.status)).length;
+  const starredCount = conversations.filter(c => starredIds.includes(c.id)).length;
+  const optedOutCount = conversations.filter(c => ["UNSUBSCRIBED", "DO_NOT_CONTACT", "NOT_INTERESTED", "WRONG_PERSON", "BOUNCED"].includes(c.lead?.status)).length;
+
+  const campaignName = selected
+    ? campaigns.find(camp => camp.id === selected.campaign_id)?.name || "Unknown Campaign"
+    : "";
+
+  const messagesByDate = selected && selected.messages
+    ? (() => {
+        const groups = {};
+        selected.messages.forEach(msg => {
+          const dateStr = new Date(msg.timestamp).toLocaleDateString([], {
+            weekday: "long",
+            month: "short",
+            day: "numeric",
+            year: "numeric"
+          });
+          if (!groups[dateStr]) {
+            groups[dateStr] = [];
+          }
+          groups[dateStr].push(msg);
+        });
+        return groups;
+      })()
+    : {};
 
   if (loading) return (
     <div className="flex flex-col items-center justify-center h-[60vh] gap-4">
@@ -4030,274 +4930,531 @@ function Inbox() {
   );
 
   return (
-    <div className="flex flex-col h-[calc(100vh-120px)] -m-8 bg-slate-50/50 rounded-2xl overflow-hidden border border-slate-100 shadow-sm">
-      {/* Header */}
-      <div className="px-6 py-5 bg-white border-b border-slate-100 flex-shrink-0 flex items-center gap-3">
-        <h1 className="text-xl font-bold text-slate-900 tracking-tight m-0">Inbox</h1>
-        {unreadCount > 0 && (
-          <span className="bg-indigo-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-sm shadow-indigo-100">
-            {unreadCount} new
-          </span>
-        )}
-      </div>
+    <div className="flex h-[calc(100vh-140px)] bg-white rounded-2xl overflow-hidden border border-slate-200/80 shadow-2xl shadow-slate-200/50 font-sans animate-fade-in">
+      {/* Pane 1: Unified Thread List & Filters */}
+      <div className="w-80 lg:w-96 flex-shrink-0 flex flex-col border-r border-slate-200 bg-slate-50/40">
+        
+        {/* Header: Title & Campaign Filter Selector */}
+        <div className="p-4 border-b border-slate-200 bg-white flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-extrabold text-slate-800 tracking-wider">
+              📥 INBOX
+            </span>
+            {unreadCount > 0 && (
+              <span className="bg-indigo-600 text-white text-[9px] font-black px-1.5 py-0.5 rounded-full shadow-sm animate-pulse">
+                {unreadCount}
+              </span>
+            )}
+          </div>
+          <select
+            value={selectedCampaignId || ""}
+            onChange={e => setSelectedCampaignId(e.target.value ? Number(e.target.value) : null)}
+            className="bg-slate-50 border border-slate-200 rounded-lg text-[10px] font-bold text-slate-700 py-1.5 px-2 focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer max-w-[150px] truncate outline-none"
+          >
+            <option value="">💼 All Campaigns</option>
+            {campaigns.map(camp => (
+              <option key={camp.id} value={camp.id}>
+                📁 {camp.name}
+              </option>
+            ))}
+          </select>
+        </div>
 
-      {/* Body: sidebar + thread */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* Sidebar */}
-        <div className="w-80 flex-shrink-0 flex flex-col border-r border-slate-100 bg-slate-50/30">
-          {/* Search */}
-          <div className="p-4 border-b border-slate-100/80 bg-white/40 backdrop-blur-md">
-            <div className="relative">
-              <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <svg className="h-5 w-5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+        {/* Folder Pills Bar */}
+        <div
+          className="flex gap-1.5 overflow-x-auto py-2.5 px-4 border-b border-slate-200/60 bg-slate-50/30 select-none"
+          style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
+        >
+          {[
+            { id: "all", label: "All", count: allCount, icon: "📩" },
+            { id: "unread", label: "Unread", count: unreadCount, icon: "📥" },
+            { id: "replied", label: "Replied", count: repliedCount, icon: "💬" },
+            { id: "interested", label: "Interested", count: interestedCount, icon: "⭐" },
+            { id: "starred", label: "Starred", count: starredCount, icon: "📍" },
+            { id: "opted_out", label: "Opt Out", count: optedOutCount, icon: "🛑" }
+          ].map(fld => (
+            <button
+              key={fld.id}
+              type="button"
+              onClick={() => setFilter(fld.id)}
+              className={`px-3 py-1 rounded-full text-[11px] font-bold tracking-wide transition-all flex items-center gap-1.5 flex-shrink-0 cursor-pointer ${
+                filter === fld.id
+                  ? "bg-slate-900 text-white shadow-sm"
+                  : "bg-white border border-slate-200 text-slate-500 hover:text-slate-800"
+              }`}
+            >
+              <span>{fld.icon}</span>
+              <span>{fld.label}</span>
+              {fld.count > 0 && (
+                <span className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded-full ${
+                  filter === fld.id ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-500"
+                }`}>
+                  {fld.count}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+
+        {/* Search & Sort Panel */}
+        <div className="p-3 border-b border-slate-200 bg-white">
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1">
+              <span className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none">
+                <svg className="h-3.5 w-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
                   <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
                 </svg>
               </span>
               <input
                 type="text"
-                className="w-full pl-9 pr-3 py-2 text-xs bg-white border border-slate-200 rounded-lg placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-500 transition-all shadow-sm"
+                className="w-full pl-8 pr-2.5 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 transition-all font-medium outline-none"
                 placeholder="Search conversations…"
                 value={search}
                 onChange={e => setSearch(e.target.value)}
               />
             </div>
-          </div>
-
-          {/* Filters */}
-          <div className="px-4 py-3 flex gap-2 border-b border-slate-100/50 bg-slate-50/10">
-            {[["all", "All"], ["unread", "Unread"], ["replied", "Replied"]].map(([val, label]) => (
-              <button
-                key={val}
-                onClick={() => setFilter(val)}
-                className={`px-3 py-1 rounded-full text-[11px] font-bold tracking-wide transition-all cursor-pointer ${filter === val
-                  ? "bg-slate-900 text-white shadow-sm shadow-slate-900/10"
-                  : "bg-slate-100 hover:bg-slate-200 text-slate-500 hover:text-slate-800"
-                  }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-
-          {/* List */}
-          <div className="flex-1 overflow-y-auto divide-y divide-slate-100/60 bg-white/20">
-            {filtered.length === 0 && (
-              <div className="p-12 text-center">
-                <div className="text-3xl mb-2">📭</div>
-                <p className="text-slate-400 text-xs font-semibold">No conversations found</p>
-              </div>
-            )}
-            {filtered.map(c => {
-              const isSelected = selected?.id === c.id;
-              return (
-                <div
-                  key={c.id}
-                  onClick={() => openConversation(c)}
-                  className={`p-4 flex gap-3 items-start cursor-pointer transition-all border-l-4 ${isSelected
-                    ? "bg-white border-l-indigo-600 shadow-sm relative z-10"
-                    : "border-l-transparent hover:bg-slate-50/80"
-                    }`}
-                >
-                  {/* Avatar */}
-                  <div
-                    style={{ background: getAvatarColor(c.id) }}
-                    className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 text-white font-semibold text-xs shadow-sm"
-                  >
-                    {getInitials(c.lead)}
-                  </div>
-
-                  {/* Content */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex justify-between items-baseline mb-1">
-                      <span className={`text-xs truncate max-w-[130px] block ${c.has_unread ? "font-bold text-slate-900" : "font-semibold text-slate-700"}`}>
-                        {c.lead?.first_name} {c.lead?.last_name}
-                      </span>
-                      <span className="text-[10px] text-slate-400 font-medium">{formatTime(c.last_message_at)}</span>
-                    </div>
-                    <p className="text-[11px] text-slate-400 truncate mb-2">
-                      {c.lead?.company || c.lead?.email}
-                    </p>
-                    <div className="flex items-center justify-between">
-                      <StatusBadge status={c.lead?.status || "NEW"} />
-                      {c.has_unread && (
-                        <span className="w-2 h-2 bg-indigo-600 rounded-full shadow-sm animate-pulse" />
-                      )}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
+            <button
+              type="button"
+              onClick={() => setSortBy(sortBy === "newest" ? "oldest" : "newest")}
+              className="px-2.5 py-1.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg text-xs font-bold text-slate-600 transition-colors flex items-center gap-1 cursor-pointer flex-shrink-0 outline-none"
+              title={sortBy === "newest" ? "Sorting newest first" : "Sorting oldest first"}
+            >
+              <span>{sortBy === "newest" ? "⚡ Newest" : "⏰ Oldest"}</span>
+            </button>
           </div>
         </div>
 
-        {/* Thread panel */}
-        <div className="flex-1 flex flex-col bg-white overflow-hidden">
-          {selected ? (
-            <>
-              {/* Thread header */}
-              <div className="px-6 py-4 border-b border-slate-100 flex items-center gap-4 flex-shrink-0 bg-white">
+        {/* Scrollable list */}
+        <div className="flex-1 overflow-y-auto divide-y divide-slate-100 bg-white">
+          {sortedConversations.length === 0 && (
+            <div className="p-10 text-center">
+              <div className="text-2xl mb-2">📭</div>
+              <p className="text-slate-400 text-xs font-semibold">No conversations found</p>
+            </div>
+          )}
+          {sortedConversations.map(c => {
+            const isSelected = selected?.id === c.id;
+            const isStarred = starredIds.includes(c.id);
+            return (
+              <div
+                key={c.id}
+                onClick={() => openConversation(c)}
+                className={`p-3.5 flex gap-3 items-start cursor-pointer transition-all border-l-3 relative group ${
+                  isSelected
+                    ? "bg-indigo-50/30 border-l-indigo-600 shadow-sm z-10"
+                    : "border-l-transparent hover:bg-slate-50/50"
+                }`}
+              >
+                {/* Avatar with unread indicator */}
+                <div className="relative flex-shrink-0">
+                  <div
+                    style={{ background: getAvatarColor(c.id) }}
+                    className="w-9 h-9 rounded-xl flex items-center justify-center text-white font-extrabold text-xs shadow-sm"
+                  >
+                    {getInitials(c.lead)}
+                  </div>
+                  {c.has_unread && (
+                    <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-indigo-600 rounded-full ring-2 ring-white shadow-sm shadow-indigo-600/30 animate-pulse" />
+                  )}
+                </div>
+
+                {/* Card text */}
+                <div className="flex-1 min-w-0">
+                  <div className="flex justify-between items-baseline mb-1">
+                    <span className={`text-xs truncate max-w-[130px] block ${
+                      c.has_unread ? "font-extrabold text-slate-900" : "font-bold text-slate-700"
+                    }`}>
+                      {c.lead?.first_name} {c.lead?.last_name}
+                    </span>
+                    <span className="text-[9px] text-slate-400 font-semibold">{formatTime(c.last_message_at)}</span>
+                  </div>
+
+                  <p className="text-[10px] text-slate-400 font-semibold truncate mb-1">
+                    {c.lead?.company || c.lead?.email}
+                  </p>
+
+                  <p className={`text-[11px] truncate mb-2 leading-tight ${
+                    c.has_unread ? "text-slate-800 font-bold" : "text-slate-400 font-medium"
+                  }`}>
+                    {getSnippet(c)}
+                  </p>
+
+                  <div className="flex items-center justify-between">
+                    <StatusBadge status={c.lead?.status || "NEW"} />
+                    <button
+                      type="button"
+                      onClick={(e) => toggleStar(c.id, e)}
+                      className={`text-xs transition-opacity duration-150 outline-none focus:outline-none ${
+                        isStarred
+                          ? "opacity-100 text-amber-400 hover:text-amber-500 scale-110"
+                          : "opacity-0 group-hover:opacity-60 text-slate-300 hover:text-amber-400"
+                      }`}
+                      title={isStarred ? "Unstar conversation" : "Star conversation"}
+                    >
+                      ★
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Pane 2: Conversation Chat Thread & Composer */}
+      <div className="flex-1 flex flex-col bg-white overflow-hidden">
+        {selected ? (
+          <>
+            {/* Header info */}
+            <div className="px-5 py-3.5 border-b border-slate-200 flex items-center justify-between flex-shrink-0 bg-white/70 backdrop-blur-md z-10">
+              <div className="flex items-center gap-3 min-w-0">
                 <div
                   style={{ background: getAvatarColor(selected.id) }}
-                  className="w-11 h-11 rounded-xl flex items-center justify-center text-white font-semibold text-sm shadow-sm"
+                  className="w-10 h-10 rounded-xl flex items-center justify-center text-white font-extrabold text-xs shadow-sm flex-shrink-0"
                 >
                   {getInitials(selected.lead)}
                 </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
-                    <h2 className="text-sm font-bold text-slate-900 m-0 truncate">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 mb-0.5 flex-wrap">
+                    <h2 className="text-sm font-extrabold text-slate-900 m-0 truncate max-w-[150px] sm:max-w-none">
                       {selected.lead?.first_name} {selected.lead?.last_name}
                     </h2>
                     <StatusBadge status={selected.lead?.status || "NEW"} />
+                    {starredIds.includes(selected.id) && (
+                      <span className="text-amber-400 text-xs font-bold" title="Starred">★</span>
+                    )}
                   </div>
-                  <div className="flex items-center gap-1.5 flex-wrap text-xs text-slate-400 font-semibold">
-                    <a href={`mailto:${selected.lead?.email}`} className="hover:text-indigo-600 transition-colors">
+                  <div className="flex items-center gap-1.5 flex-wrap text-[10px] text-slate-400 font-bold">
+                    <a href={`mailto:${selected.lead?.email}`} className="hover:text-indigo-600 transition-colors truncate max-w-[140px] sm:max-w-none">
                       {selected.lead?.email}
                     </a>
                     {selected.lead?.company && (
                       <>
                         <span>·</span>
-                        <span className="text-slate-500">{selected.lead?.company}</span>
+                        <span className="text-slate-500 truncate max-w-[100px] sm:max-w-none">{selected.lead?.company}</span>
                       </>
                     )}
-                    {selected.lead?.website && (
-                      <>
-                        <span>·</span>
-                        <a
-                          href={selected.lead.website}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-indigo-600 hover:text-indigo-700 transition-colors"
-                        >
-                          {selected.lead.website.replace(/^https?:\/\//, "").slice(0, 30)}
-                        </a>
-                      </>
-                    )}
-                  </div>
-                </div>
-                <div className="flex-shrink-0">
-                  <a
-                    href={`mailto:${selected.lead?.email}`}
-                    className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold transition-all shadow-sm shadow-indigo-100 hover:shadow-indigo-200"
-                  >
-                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                    </svg>
-                    Reply
-                  </a>
-                </div>
-              </div>
-
-              {/* Messages */}
-              <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-6 bg-slate-50/30">
-                {selected.messages?.length === 0 && (
-                  <div className="text-center py-12 text-slate-400 text-xs font-semibold">No messages yet</div>
-                )}
-                {selected.messages?.map((msg, i) => {
-                  const isOut = msg.direction === "OUTBOUND";
-                  return (
-                    <div key={msg.id} className="flex flex-col gap-1.5 animate-fade-in" style={{ alignItems: isOut ? "flex-end" : "flex-start" }}>
-                      {/* Label */}
-                      <div className="flex items-center gap-2 mb-0.5">
-                        {!isOut && (
-                          <div
-                            style={{ background: getAvatarColor(selected.id) }}
-                            className="w-5 h-5 rounded-md flex items-center justify-center text-white font-semibold text-[9px]"
-                          >
-                            {getInitials(selected.lead)}
-                          </div>
-                        )}
-                        <span className="text-[10px] text-slate-400 font-semibold">
-                          {isOut ? "You" : selected.lead?.first_name} · {formatTime(msg.timestamp)}
-                        </span>
-                        {isOut && (
-                          <div className="w-5 h-5 rounded-md bg-indigo-600 flex items-center justify-center shadow-sm">
-                            <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5" />
-                            </svg>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Bubble */}
-                      <div
-                        className={`max-w-[70%] p-4 text-xs leading-relaxed shadow-sm ${isOut
-                          ? "bg-slate-900 text-white rounded-2xl rounded-tr-sm shadow-slate-900/5"
-                          : "bg-white text-slate-800 border border-slate-100 rounded-2xl rounded-tl-sm"
-                          }`}
-                      >
-                        {msg.subject && (
-                          <p className={`margin-0 mb-2 text-[10px] font-extrabold tracking-wider uppercase ${isOut ? "text-indigo-300" : "text-indigo-600"}`}>
-                            {msg.subject}
-                          </p>
-                        )}
-                        <p className="margin-0 whitespace-pre-wrap break-words">{msg.body}</p>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* Message Reply Box */}
-              <div className="p-4 border-t border-slate-100 bg-slate-50/30 flex-shrink-0 flex flex-col gap-3">
-                <div className="relative border border-slate-200 focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-100 rounded-xl bg-white transition-all shadow-sm">
-                  <textarea
-                    rows={4}
-                    value={replyBody}
-                    onChange={e => setReplyBody(e.target.value)}
-                    placeholder={`Reply to ${selected.lead?.first_name || selected.lead?.email}...`}
-                    className="w-full border-0 focus:ring-0 text-xs px-4 py-3 placeholder-slate-400 resize-none outline-none text-slate-800 font-medium"
-                    onKeyDown={e => {
-                      if (e.key === "Enter" && !e.shiftKey) {
-                        e.preventDefault();
-                        handleSendReply();
-                      }
-                    }}
-                  />
-                  <div className="flex items-center justify-between px-3 py-2 bg-slate-50 border-t border-slate-100 rounded-b-xl">
-                    <span className="text-[10px] text-slate-400 font-semibold flex items-center gap-1.5">
-                      <svg className="w-3.5 h-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5" /></svg>
-                      Sends via assigned SMTP/OAuth inbox
+                    <span>·</span>
+                    <span className="text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded font-extrabold text-[9px] truncate max-w-[100px] sm:max-w-[150px]" title={campaignName}>
+                      {campaignName}
                     </span>
-                    <Button
-                      size="sm"
-                      onClick={handleSendReply}
-                      disabled={sending || !replyBody.trim()}
-                      className="text-xs font-bold"
-                    >
-                      {sending ? (
-                        <>
-                          <div className="w-3 h-3 border-2 border-slate-200 border-t-white rounded-full animate-spin" />
-                          Sending...
-                        </>
-                      ) : (
-                        <>
-                          <svg className="w-3.5 h-3.5 transform rotate-45 -mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
-                          Send Reply
-                        </>
-                      )}
-                    </Button>
                   </div>
                 </div>
-                <p className="margin-0 text-[10px] text-slate-400 text-center font-semibold">
-                  Or reply in your client. Inbound replies are auto-detected & threaded automatically here.
-                </p>
               </div>
-            </>
-          ) : (
-            <div className="flex-1 flex flex-col items-center justify-center gap-4 text-center p-8 bg-slate-50/10">
-              <div className="w-14 h-14 rounded-2xl bg-slate-100 flex items-center justify-center text-slate-400 shadow-sm">
-                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0a2 2 0 01-2 2H6a2 2 0 01-2-2m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" />
-                </svg>
-              </div>
-              <div>
-                <h3 className="font-bold text-sm text-slate-900 m-0">Select a conversation</h3>
-                <p className="text-xs text-slate-400 mt-1 max-w-xs">{conversations.length} total · {unreadCount} unread</p>
+              <div className="flex items-center gap-1.5 flex-shrink-0">
+                <button
+                  type="button"
+                  onClick={(e) => toggleStar(selected.id, e)}
+                  className={`p-1.5 border border-slate-200 rounded-lg text-xs transition-colors hover:bg-slate-50 cursor-pointer outline-none ${
+                    starredIds.includes(selected.id) ? "text-amber-400 border-amber-200 bg-amber-50/20" : "text-slate-400"
+                  }`}
+                  title="Star/Highlight Conversation"
+                >
+                  ★
+                </button>
+                <button
+                  type="button"
+                  onClick={toggleDetails}
+                  className={`px-2.5 py-1.5 border rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer outline-none ${
+                    showDetails
+                      ? "bg-slate-900 text-white border-slate-900 hover:bg-slate-800"
+                      : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
+                  }`}
+                >
+                  ℹ Details {showDetails ? "→" : "←"}
+                </button>
               </div>
             </div>
-          )}
-        </div>
+
+            {/* Chat list */}
+            <div className="flex-1 overflow-y-auto p-5 flex flex-col gap-5 bg-slate-50/20">
+              {Object.keys(messagesByDate).length === 0 ? (
+                <div className="text-center py-12 text-slate-400 text-xs font-semibold">No messages in this conversation.</div>
+              ) : (
+                Object.entries(messagesByDate).map(([dateStr, msgs]) => (
+                  <div key={dateStr} className="space-y-4">
+                    {/* Date line separator */}
+                    <div className="flex items-center justify-center my-4">
+                      <div className="h-[1px] bg-slate-200 flex-1" />
+                      <span className="px-3 text-[10px] text-slate-400 font-extrabold tracking-wider uppercase bg-white border border-slate-100 rounded-full py-0.5">
+                        {dateStr}
+                      </span>
+                      <div className="h-[1px] bg-slate-200 flex-1" />
+                    </div>
+
+                    {/* Messages bubbles */}
+                    {msgs.map((msg) => {
+                      const isOut = msg.direction === "OUTBOUND";
+                      return (
+                        <div key={msg.id} className="flex flex-col gap-1" style={{ alignItems: isOut ? "flex-end" : "flex-start" }}>
+                          <div className="flex items-center gap-1.5 mb-0.5">
+                            {!isOut && (
+                              <div
+                                style={{ background: getAvatarColor(selected.id) }}
+                                className="w-4 h-4 rounded-md flex items-center justify-center text-white font-extrabold text-[8px]"
+                              >
+                                {getInitials(selected.lead)}
+                              </div>
+                            )}
+                            <span className="text-[9px] text-slate-400 font-semibold">
+                              {isOut ? "You" : selected.lead?.first_name} · {new Date(msg.timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                            </span>
+                            {isOut && (
+                              <div className="w-4 h-4 rounded bg-slate-900 flex items-center justify-center shadow-sm">
+                                <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3">
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5" />
+                                </svg>
+                              </div>
+                            )}
+                          </div>
+
+                          <div
+                            className={`max-w-[75%] p-3.5 text-xs leading-relaxed shadow-sm transition-all hover:shadow-md ${
+                              isOut
+                                ? "bg-slate-900 text-white rounded-2xl rounded-tr-none"
+                                : "bg-white text-slate-800 border border-slate-200 rounded-2xl rounded-tl-none"
+                            }`}
+                          >
+                            {msg.subject && (
+                              <p className={`margin-0 mb-1.5 text-[9px] font-extrabold tracking-wider uppercase ${isOut ? "text-indigo-300" : "text-indigo-600"}`}>
+                                Subj: {msg.subject}
+                              </p>
+                            )}
+                            <p className="margin-0 whitespace-pre-wrap break-words font-medium">{msg.body}</p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ))
+              )}
+            </div>
+
+            {/* composer reply block */}
+            <div className="p-4 border-t border-slate-200 bg-slate-50/50 flex-shrink-0 flex flex-col gap-2">
+              <div className="border border-slate-200 focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-100 rounded-xl bg-white transition-all shadow-sm">
+                
+                {/* Advanced Composer Toolbar */}
+                <div className="flex items-center justify-between px-3 py-1.5 border-b border-slate-100 bg-slate-50/50 rounded-t-xl text-[10px] text-slate-500 font-bold select-none">
+                  <div className="flex items-center gap-2">
+                    <span className="text-slate-400">Insert Variable:</span>
+                    {["first_name", "company", "website"].map(field => (
+                      <button
+                        key={field}
+                        type="button"
+                        onClick={() => insertVariable(field)}
+                        className="px-2 py-0.5 bg-white border border-slate-200 rounded text-slate-700 hover:bg-indigo-50 hover:text-indigo-600 transition-colors cursor-pointer outline-none"
+                      >
+                        {`{${field}}`}
+                      </button>
+                    ))}
+                  </div>
+                  {replyBody.trim() && (
+                    <span className="text-indigo-600 font-extrabold animate-pulse text-[9px]">Draft auto-saved</span>
+                  )}
+                </div>
+
+                {/* Textarea */}
+                <textarea
+                  id="inbox-composer-textarea"
+                  rows={4}
+                  value={replyBody}
+                  onChange={e => handleReplyBodyChange(e.target.value)}
+                  placeholder={`Reply to ${selected.lead?.first_name || selected.lead?.email}...`}
+                  className="w-full border-0 focus:ring-0 text-xs px-4 py-3 placeholder-slate-400 resize-none outline-none text-slate-800 font-medium"
+                  onKeyDown={e => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSendReply();
+                    }
+                  }}
+                />
+
+                {/* Action footer inside composer */}
+                <div className="flex items-center justify-between px-3 py-2 bg-slate-50 border-t border-slate-100 rounded-b-xl">
+                  <span className="text-[9px] text-slate-400 font-bold flex items-center gap-1">
+                    <svg className="w-3.5 h-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5" /></svg>
+                    Sends via assigned SMTP/OAuth inbox
+                  </span>
+                  <Button
+                    size="sm"
+                    onClick={handleSendReply}
+                    disabled={sending || !replyBody.trim()}
+                    className="text-xs font-bold"
+                  >
+                    {sending ? (
+                      <>
+                        <div className="w-3 h-3 border-2 border-slate-200 border-t-white rounded-full animate-spin" />
+                        Sending...
+                      </>
+                    ) : (
+                      <>
+                        <svg className="w-3.5 h-3.5 transform rotate-45 -mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
+                        Send Reply
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </div>
+              <p className="margin-0 text-[9px] text-slate-400 text-center font-semibold">
+                Replies are sent via SMTP client. Inbound messages are automatically detected & threaded.
+              </p>
+            </div>
+          </>
+        ) : (
+          <div className="flex-1 flex flex-col items-center justify-center gap-4 text-center p-8 bg-slate-50/10">
+            <div className="w-14 h-14 rounded-2xl bg-indigo-50 border border-indigo-100 text-indigo-500 flex items-center justify-center shadow-sm">
+              <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0a2 2 0 01-2 2H6a2 2 0 01-2-2m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" />
+              </svg>
+            </div>
+            <div>
+              <h3 className="font-extrabold text-sm text-slate-900 m-0">Select a conversation</h3>
+              <p className="text-xs text-slate-400 mt-1 max-w-xs">{conversations.length} total · {unreadCount} unread</p>
+            </div>
+          </div>
+        )}
       </div>
+
+      {/* Pane 3: Collapsible Right Lead Sidebar */}
+      {selected && showDetails && (
+        <div className="w-72 border-l border-slate-200 bg-white flex flex-col flex-shrink-0 overflow-y-auto">
+          {/* Header Panel */}
+          <div className="p-4 border-b border-slate-200 text-center flex flex-col items-center">
+            <div
+              style={{ background: getAvatarColor(selected.id) }}
+              className="w-16 h-16 rounded-2xl flex items-center justify-center text-white font-extrabold text-lg shadow-md mb-2"
+            >
+              {getInitials(selected.lead)}
+            </div>
+            <h3 className="font-extrabold text-sm text-slate-900 m-0">
+              {selected.lead?.first_name} {selected.lead?.last_name}
+            </h3>
+            <p className="text-[10px] text-slate-400 font-bold mt-0.5 truncate max-w-full">
+              {selected.lead?.company || selected.lead?.email}
+            </p>
+          </div>
+
+          <div className="p-4 space-y-4 divide-y divide-slate-100">
+            {/* Status updates section */}
+            <div className="pt-0 space-y-2">
+              <label className="text-[10px] font-extrabold tracking-wider text-slate-400 uppercase block mb-1">Lead Status</label>
+              <div className="relative">
+                <select
+                  value={selected.lead?.status || "NEW"}
+                  onChange={(e) => handleUpdateStatus(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-700 py-2 px-3 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 cursor-pointer outline-none"
+                >
+                  <option value="NEW">🆕 New Lead</option>
+                  <option value="CONTACTED">✉️ Contacted</option>
+                  <option value="REPLIED">💬 Replied</option>
+                  <option value="OUT_OF_OFFICE">🌴 Out of Office</option>
+                  <option value="INTERESTED">🔥 Interested</option>
+                  <option value="MEETING_BOOKED">📅 Meeting Booked</option>
+                  <option value="NOT_INTERESTED">❄️ Not Interested</option>
+                  <option value="WRONG_PERSON">❓ Wrong Person</option>
+                  <option value="DO_NOT_CONTACT">🚫 DND (Do Not Contact)</option>
+                  <option value="UNSUBSCRIBED">🔕 Unsubscribed</option>
+                  <option value="BOUNCED">💥 Bounced</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Campaign info section */}
+            <div className="pt-3.5 space-y-2 text-xs font-semibold text-slate-700">
+              <label className="text-[10px] font-extrabold tracking-wider text-slate-400 uppercase block">Outreach Stats</label>
+              <div className="space-y-1 bg-slate-50 rounded-xl p-3 border border-slate-100 font-semibold text-[11px] text-slate-600">
+                <div className="flex justify-between">
+                  <span>Campaign:</span>
+                  <span className="text-slate-800 font-extrabold truncate max-w-[130px]">{campaignName}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Sequence Step:</span>
+                  <span className="text-slate-800 font-extrabold">Step {selected.lead?.current_step || 0}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Created:</span>
+                  <span className="text-slate-800 font-extrabold">
+                    {selected.lead?.created_at ? new Date(selected.lead.created_at).toLocaleDateString([], { month: "short", day: "numeric" }) : "N/A"}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Contact info list */}
+            <div className="pt-3.5 space-y-2">
+              <label className="text-[10px] font-extrabold tracking-wider text-slate-400 uppercase block">Contact Information</label>
+              <div className="space-y-2 text-xs font-semibold text-slate-700">
+                <div>
+                  <span className="text-[10px] text-slate-400 block font-bold">Email Address</span>
+                  <div className="flex items-center justify-between gap-1 mt-0.5">
+                    <a href={`mailto:${selected.lead?.email}`} className="text-indigo-600 hover:underline truncate block">
+                      {selected.lead?.email}
+                    </a>
+                    <button
+                      type="button"
+                      onClick={() => { navigator.clipboard.writeText(selected.lead?.email || ""); alert("Email copied!"); }}
+                      className="text-[10px] hover:text-indigo-600 cursor-pointer p-1"
+                      title="Copy email"
+                    >
+                      📋
+                    </button>
+                  </div>
+                </div>
+
+                {selected.lead?.website && (
+                  <div>
+                    <span className="text-[10px] text-slate-400 block font-bold">Website / URL</span>
+                    <a
+                      href={selected.lead.website.startsWith("http") ? selected.lead.website : `https://${selected.lead.website}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-indigo-600 hover:underline truncate block mt-0.5"
+                    >
+                      {selected.lead.website}
+                    </a>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Custom fields section */}
+            {selected.lead?.custom_fields && Object.keys(selected.lead.custom_fields).length > 0 && (
+              <div className="pt-3.5 space-y-2">
+                <label className="text-[10px] font-extrabold tracking-wider text-slate-400 uppercase block">Custom Variables</label>
+                <div className="max-h-36 overflow-y-auto space-y-1.5 pr-1">
+                  {Object.entries(selected.lead.custom_fields).map(([key, value]) => (
+                    <div key={key} className="flex justify-between gap-2 border-b border-slate-100 pb-1 text-[11px]">
+                      <span className="text-slate-400 truncate max-w-[100px] font-bold" title={key}>{key}</span>
+                      <span className="text-slate-700 truncate font-semibold" title={String(value)}>{String(value)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Notes Section */}
+            <div className="pt-3.5 space-y-2">
+              <label className="text-[10px] font-extrabold tracking-wider text-slate-400 uppercase block">Conversation Notes</label>
+              <textarea
+                rows={3}
+                value={noteText}
+                onChange={e => setNoteText(e.target.value)}
+                placeholder="Save custom notes about this lead..."
+                className="w-full bg-slate-50 border border-slate-200 rounded-lg text-[11px] p-2 placeholder-slate-400 outline-none text-slate-700 font-medium focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 resize-none"
+              />
+              <button
+                type="button"
+                onClick={handleSaveNote}
+                disabled={savingNote}
+                className="w-full py-1.5 bg-slate-900 text-white rounded-lg text-[11px] font-bold tracking-wide transition-colors hover:bg-slate-800 disabled:bg-slate-400 cursor-pointer outline-none"
+              >
+                {savingNote ? "Saving note..." : "Save Note"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -4385,7 +5542,7 @@ export default function App() {
 
       {/* Main content */}
       <div className="ml-60 p-8 min-h-screen">
-        <div className="max-w-6xl mx-auto animate-fade-in">
+        <div className={`${page === "inbox" ? "max-w-none w-full" : "max-w-6xl"} mx-auto animate-fade-in`}>
           {page === "campaigns" && !selectedCampaign && !showNewCampaign && (
             <CampaignList onSelect={setSelectedCampaign} onNew={() => setShowNewCampaign(true)} />
           )}

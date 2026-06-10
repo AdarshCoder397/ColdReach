@@ -12,6 +12,8 @@ import imaplib
 import email
 import logging
 import re
+import html
+from html.parser import HTMLParser
 from datetime import datetime, timedelta
 from email.header import decode_header
 from typing import Optional, Tuple
@@ -89,21 +91,115 @@ WRONG_PERSON_PATTERNS = [
 ]
 
 
+class HTMLTextExtractor(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.reset()
+        self.convert_charrefs = True
+        self.result = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag in ('p', 'br', 'div', 'tr', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li'):
+            self.result.append('\n')
+
+    def handle_endtag(self, tag):
+        if tag in ('p', 'div', 'tr', 'li'):
+            self.result.append('\n')
+
+    def handle_data(self, data):
+        self.result.append(data)
+
+    def get_text(self) -> str:
+        text = ''.join(self.result)
+        text = html.unescape(text)
+        lines = [line.strip() for line in text.splitlines()]
+        cleaned_lines = []
+        for line in lines:
+            if line:
+                cleaned_lines.append(line)
+            elif cleaned_lines and cleaned_lines[-1] != "":
+                cleaned_lines.append("")
+        return '\n'.join(cleaned_lines).strip()
+
+
+def clean_html(html_content: str) -> str:
+    try:
+        extractor = HTMLTextExtractor()
+        extractor.feed(html_content)
+        return extractor.get_text()
+    except Exception:
+        import re
+        text = re.sub(r'<[^>]+>', ' ', html_content)
+        return html.unescape(text).strip()
+
+
+def strip_reply_thread(body: str) -> str:
+    if not body:
+        return ""
+    
+    lines = body.splitlines()
+    clean_lines = []
+    
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        
+        # Stop at quoted lines
+        if stripped.startswith(">") or stripped.startswith("|"):
+            break
+            
+        # Stop at common email thread headers
+        if re.search(r"^\s*on\s+.*wrote\s*:", stripped, re.IGNORECASE):
+            break
+        if re.search(r"wrote\s*:", stripped, re.IGNORECASE):
+            break
+        if re.search(r"^\s*from\s*:", stripped, re.IGNORECASE):
+            break
+        if re.search(r"^\s*to\s*:", stripped, re.IGNORECASE):
+            break
+        if re.search(r"^\s*date\s*:", stripped, re.IGNORECASE):
+            break
+        if re.search(r"^\s*subject\s*:", stripped, re.IGNORECASE):
+            break
+        if re.search(r"^-+original message-+$", stripped, re.IGNORECASE):
+            break
+        if re.search(r"^____+$", stripped):
+            break
+        if re.search(r"^----+$", stripped):
+            break
+            
+        # Check for wrapped "On ... wrote:" header
+        if stripped.lower().startswith("on ") and i + 1 < len(lines) and "wrote:" in lines[i+1].lower():
+            break
+        if stripped.lower().startswith("on ") and i + 2 < len(lines) and not lines[i+1].strip() and "wrote:" in lines[i+2].lower():
+            break
+            
+        # Check for signature separators or starts
+        if clean_lines:
+            sig_markers = ["--", "thanks", "regards", "best regards", "sincerely", "warmly", "thanks & regards", "thanks and regards"]
+            if stripped.lower() in sig_markers or any(stripped.lower().startswith(m + ",") for m in sig_markers) or any(stripped.lower().startswith(m + " ") for m in sig_markers):
+                break
+                
+        clean_lines.append(line)
+        
+    return "\n".join(clean_lines).strip()
+
+
 def detect_reply_intent(subject: str, body: str) -> Tuple[str, float]:
     """
     Analyse reply text and return (intent, confidence).
     Intent: OOO | NOT_INTERESTED | INTERESTED | MEETING_BOOKED | WRONG_PERSON | REPLIED
     Confidence: 0.0–1.0
     """
-    text = f"{subject} {body}".lower()
+    cleaned_body = strip_reply_thread(body)
+    text = f"{subject} {cleaned_body}".lower()
 
     # Check patterns in priority order
     checks = [
         ("OUT_OF_OFFICE",  OOO_PATTERNS,           0.9),
         ("MEETING_BOOKED", MEETING_PATTERNS,        0.85),
+        ("NOT_INTERESTED", NOT_INTERESTED_PATTERNS, 0.85),
         ("INTERESTED",     INTERESTED_PATTERNS,     0.75),
         ("WRONG_PERSON",   WRONG_PERSON_PATTERNS,   0.8),
-        ("NOT_INTERESTED", NOT_INTERESTED_PATTERNS, 0.85),
     ]
 
     for intent, patterns, confidence in checks:
@@ -371,9 +467,31 @@ def _extract_body(email_message) -> str:
                     break
                 except Exception:
                     pass
+        if not body:
+            for part in email_message.walk():
+                if part.get_content_type() == "text/html":
+                    try:
+                        html_body = part.get_payload(decode=True).decode("utf-8", errors="replace")
+                        body = clean_html(html_body)
+                        break
+                    except Exception:
+                        pass
     else:
+        content_type = email_message.get_content_type()
         try:
-            body = email_message.get_payload(decode=True).decode("utf-8", errors="replace")
+            raw_payload = email_message.get_payload(decode=True)
+            if raw_payload:
+                decoded = raw_payload.decode("utf-8", errors="replace")
+                if content_type == "text/html":
+                    body = clean_html(decoded)
+                else:
+                    body = decoded
+            else:
+                body = ""
         except Exception:
             body = str(email_message.get_payload())
+            
+        if body and ("<html" in body.lower() or "<div" in body.lower() or "<p" in body.lower()):
+            body = clean_html(body)
+            
     return body[:5000]

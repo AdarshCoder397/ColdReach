@@ -139,7 +139,19 @@ def send_email_via_smtp(
     try:
         password = decrypt_password(email_account.smtp_password_encrypted) if email_account.smtp_password_encrypted else ""
 
-        subject = personalize_template(sequence_step.subject, lead)
+        subject_template = sequence_step.subject
+        if not subject_template:
+            # Find the first step of this sequence variant to inherit its subject
+            from app.models import SequenceStep as SequenceStepModel
+            first_step = db.query(SequenceStepModel).filter(
+                SequenceStepModel.sequence_id == sequence_step.sequence_id
+            ).order_by(SequenceStepModel.step_number.asc()).first()
+            if first_step and first_step.subject:
+                subject_template = first_step.subject
+            else:
+                subject_template = "Follow-up"
+
+        subject = personalize_template(subject_template, lead)
         body = personalize_template(sequence_step.body, lead)
 
         # Create email event first to get its ID for open tracking
@@ -190,6 +202,14 @@ def send_email_via_smtp(
                 msg = MIMEMultipart("alternative")
                 msg.attach(MIMEText(body, "html"))
 
+        # Thread reply headers (for follow-ups)
+        if thread_message_id:
+            msg["In-Reply-To"] = thread_message_id
+            msg["References"] = thread_message_id
+            # Prefix subject for follow-ups if not already "Re:"
+            if not subject.startswith("Re:"):
+                subject = f"Re: {subject}"
+
         msg["From"] = f"{email_account.name} <{email_account.email}>"
         msg["To"] = lead.email
         msg["Subject"] = subject
@@ -198,14 +218,6 @@ def send_email_via_smtp(
         message_id = make_msgid(domain=email_account.email.split("@")[1])
         msg["Message-ID"] = message_id
         event.message_id = message_id
-
-        # Thread reply headers (for follow-ups)
-        if thread_message_id:
-            msg["In-Reply-To"] = thread_message_id
-            msg["References"] = thread_message_id
-            # Prefix subject for follow-ups if not already "Re:"
-            if not subject.startswith("Re:"):
-                msg["Subject"] = f"Re: {subject}"
 
         # Connect and send
         if email_account.use_tls:

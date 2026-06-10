@@ -293,6 +293,15 @@ def _schedule_campaign_emails(db: Session, campaign: Campaign):
         first_step = sorted(lead_seq.steps, key=lambda s: s.step_number)[0]
         account = send_slots[slot_index]
 
+        existing = db.query(ScheduledEmail).filter(
+            ScheduledEmail.lead_id == lead.id,
+            ScheduledEmail.sequence_step_id == first_step.id,
+            ScheduledEmail.is_sent == False,
+            ScheduledEmail.is_cancelled == False,
+        ).first()
+        if existing:
+            continue
+
         send_time = _calculate_spaced_send_time(
             campaign=campaign,
             account=account,
@@ -313,6 +322,8 @@ def _schedule_campaign_emails(db: Session, campaign: Campaign):
         slot_index += 1
 
     logger.info(f"Campaign {campaign.id}: queued {new_scheduled} new lead emails")
+    db.flush()
+    reschedule_pending_emails(db, campaign.id)
 
 
 # ── Smart interval calculation ─────────────────────────────────────────────────
@@ -359,9 +370,11 @@ def _calculate_spaced_send_time(
     """
     Calculate the exact send time for a slot, evenly spaced across the window.
     This function is timezone-aware and uses campaign.timezone (defaults to Asia/Kolkata).
+    Supports windows that span across midnight and prevents scheduling slots in the past.
     """
     from zoneinfo import ZoneInfo
-    from datetime import timezone as dt_timezone
+    from datetime import timezone as dt_timezone, time, timedelta
+    import random
 
     tz_name = campaign.timezone or "Asia/Kolkata"
     try:
@@ -377,10 +390,29 @@ def _calculate_spaced_send_time(
     send_date_local = now_local + timedelta(days=delay)
 
     # Parse sending window
-    start_h, start_m = map(int, campaign.sending_window_start.split(":"))
-    end_h, end_m = map(int, campaign.sending_window_end.split(":"))
+    try:
+        start_h, start_m = map(int, campaign.sending_window_start.split(":"))
+        end_h, end_m = map(int, campaign.sending_window_end.split(":"))
+    except Exception:
+        start_h, start_m = 9, 0
+        end_h, end_m = 17, 0
+
     window_start_mins = start_h * 60 + start_m
     window_end_mins = end_h * 60 + end_m
+    
+    # Check if window crosses midnight
+    if window_end_mins < window_start_mins:
+        window_end_mins += 1440
+
+    # Calculate current local time in minutes relative to the start of send_date_local
+    start_of_date_local = datetime.combine(send_date_local.date(), datetime.min.time()).replace(tzinfo=tz)
+    now_mins = (now_local - start_of_date_local).total_seconds() / 60
+
+    # If we are scheduling for today/the current active session, clamp the window start to the future
+    if now_mins > window_start_mins:
+        # Give a 2-minute buffer so emails are scheduled starting 2 minutes from now
+        window_start_mins = max(window_start_mins, now_mins + 2)
+
     window_length_mins = max(window_end_mins - window_start_mins, 1)
 
     # Even spacing across window
@@ -390,7 +422,7 @@ def _calculate_spaced_send_time(
     else:
         offset_mins = window_length_mins / 2  # Single email goes mid-window
 
-    # Small random jitter ±(interval/4) so emails don't fire at exact intervals
+    # Small random jitter so emails don't fire at exact intervals
     if total_slots > 1:
         jitter = random.uniform(-interval_mins / 4, interval_mins / 4)
     else:
@@ -399,16 +431,22 @@ def _calculate_spaced_send_time(
     total_offset = window_start_mins + offset_mins + jitter
     total_offset = max(window_start_mins, min(window_end_mins - 1, total_offset))
 
+    # Handle overflow if slot spills over midnight
+    target_date = send_date_local.date()
+    if total_offset >= 1440:
+        target_date = target_date + timedelta(days=1)
+        total_offset -= 1440
+
     send_hour = int(total_offset // 60)
     send_minute = int(total_offset % 60)
     send_second = random.randint(0, 59)
 
-    send_time_local = send_date_local.replace(
-        hour=send_hour,
-        minute=send_minute,
-        second=send_second,
-        microsecond=0,
+    # Combine target_date with local time
+    send_time_local = datetime.combine(
+        target_date,
+        time(hour=send_hour, minute=send_minute, second=send_second)
     )
+    send_time_local = send_time_local.replace(tzinfo=tz)
 
     # If the calculated slot time has already passed today, roll it forward to tomorrow
     if send_time_local <= now_local:
@@ -447,49 +485,295 @@ def cancel_pending_emails_for_lead(db: Session, lead_id: int, reason: str = "rep
     return count
 
 
-def recalculate_campaign_schedule(db: Session, campaign_id: int):
+def _calculate_spaced_time_for_date(
+    campaign,
+    date_obj,
+    slot_number: int,
+    total_slots: int,
+) -> datetime:
     """
-    Re-calculate scheduled emails when campaign settings change.
-    Currently handles timezone changes and sending window updates.
+    Calculate the exact send time for a slot on a specific date, evenly spaced across the window.
+    Supports sending windows that span across midnight and prevents scheduling slots in the past.
     """
+    from zoneinfo import ZoneInfo
+    from datetime import timezone as dt_timezone, time, timedelta
+    import random
+
+    tz_name = campaign.timezone or "Asia/Kolkata"
+    try:
+        tz = ZoneInfo(tz_name)
+    except Exception:
+        tz = ZoneInfo("Asia/Kolkata")
+
+    # Parse sending window
+    try:
+        start_h, start_m = map(int, campaign.sending_window_start.split(":"))
+        end_h, end_m = map(int, campaign.sending_window_end.split(":"))
+    except Exception:
+        start_h, start_m = 9, 0
+        end_h, end_m = 17, 0
+
+    window_start_mins = start_h * 60 + start_m
+    window_end_mins = end_h * 60 + end_m
+    
+    # Check if window crosses midnight
+    if window_end_mins < window_start_mins:
+        window_end_mins += 1440
+
+    # Calculate current local time in minutes relative to the start of date_obj
+    now_local = datetime.now(tz)
+    start_of_date_local = datetime.combine(date_obj, time.min).replace(tzinfo=tz)
+    now_mins = (now_local - start_of_date_local).total_seconds() / 60
+
+    # If we are scheduling for today/the current active session, clamp the window start to the future
+    if now_mins > window_start_mins:
+        # Give a 2-minute buffer so emails are scheduled starting 2 minutes from now
+        window_start_mins = max(window_start_mins, now_mins + 2)
+
+    window_length_mins = max(window_end_mins - window_start_mins, 1)
+
+    # Even spacing across window
+    if total_slots > 1:
+        interval_mins = window_length_mins / total_slots
+        offset_mins = slot_number * interval_mins
+    else:
+        offset_mins = window_length_mins / 2  # Single email goes mid-window
+
+    # Small random jitter so emails don't fire at exact intervals
+    if total_slots > 1:
+        jitter = random.uniform(-interval_mins / 4, interval_mins / 4)
+    else:
+        jitter = random.uniform(-5, 5)
+
+    total_offset = window_start_mins + offset_mins + jitter
+    total_offset = max(window_start_mins, min(window_end_mins - 1, total_offset))
+
+    # Handle overflow if slot spills over midnight
+    target_date = date_obj
+    if total_offset >= 1440:
+        target_date = date_obj + timedelta(days=1)
+        total_offset -= 1440
+
+    send_hour = int(total_offset // 60)
+    send_minute = int(total_offset % 60)
+    send_second = random.randint(0, 59)
+
+    # Combine target_date with local time
+    send_time_local = datetime.combine(
+        target_date,
+        time(hour=send_hour, minute=send_minute, second=send_second)
+    )
+    send_time_local = send_time_local.replace(tzinfo=tz)
+
+    # Convert to UTC and remove tzinfo to yield naive datetime representing UTC
+    return send_time_local.astimezone(dt_timezone.utc).replace(tzinfo=None)
+
+
+def reschedule_pending_emails(db: Session, campaign_id: int):
+    """
+    Redistribute all pending scheduled emails day-by-day based on campaign daily limits.
+    Enforces total daily limit, max new leads limit, and max follow-ups limit.
+    Spaces emails evenly across the window for each day.
+    """
+    from zoneinfo import ZoneInfo
+    from datetime import timezone as dt_timezone
+    from collections import defaultdict
+
     campaign = db.query(Campaign).get(campaign_id)
     if not campaign:
         return
 
-    # Update all scheduled emails with new times based on new settings
-    scheduled = db.query(ScheduledEmail).filter(
+    tz_name = campaign.timezone or "Asia/Kolkata"
+    try:
+        tz = ZoneInfo(tz_name)
+    except Exception:
+        tz = ZoneInfo("Asia/Kolkata")
+
+    # Get current time in campaign timezone
+    now_local = datetime.now(tz)
+    today_local = now_local.date()
+
+    # Get window end time today to determine if today's window is already closed
+    try:
+        end_h, end_m = map(int, campaign.sending_window_end.split(":"))
+        start_h, start_m = map(int, campaign.sending_window_start.split(":"))
+    except Exception:
+        end_h, end_m = 17, 0
+        start_h, start_m = 9, 0
+
+    from datetime import time, timedelta
+    session_end_local = datetime.combine(today_local, time(hour=end_h, minute=end_m)).replace(tzinfo=tz)
+    # Check if window crosses midnight
+    if (end_h * 60 + end_m) < (start_h * 60 + start_m):
+        session_end_local += timedelta(days=1)
+
+    if now_local >= session_end_local:
+        earliest_date = today_local + timedelta(days=1)
+    else:
+        earliest_date = today_local
+
+    # Fetch sent emails count for today
+    sent_followups = 0
+    sent_new_leads = 0
+    try:
+        local_start = datetime.combine(today_local, datetime.min.time()).replace(tzinfo=tz)
+        local_end = datetime.combine(today_local, datetime.max.time()).replace(tzinfo=tz)
+        utc_start = local_start.astimezone(dt_timezone.utc).replace(tzinfo=None)
+        utc_end = local_end.astimezone(dt_timezone.utc).replace(tzinfo=None)
+
+        sent_today_emails = db.query(ScheduledEmail, SequenceStep).join(
+            SequenceStep, ScheduledEmail.sequence_step_id == SequenceStep.id
+        ).filter(
+            ScheduledEmail.campaign_id == campaign_id,
+            ScheduledEmail.is_sent == True,
+            ScheduledEmail.sent_at >= utc_start,
+            ScheduledEmail.sent_at <= utc_end
+        ).all()
+
+        for se, step in sent_today_emails:
+            if step.step_number > 1:
+                sent_followups += 1
+            else:
+                sent_new_leads += 1
+    except Exception as e:
+        logger.error(f"Error querying sent emails for today: {e}", exc_info=True)
+
+    # Load all pending scheduled emails with their sequence steps
+    pending = db.query(ScheduledEmail, SequenceStep).join(
+        SequenceStep, ScheduledEmail.sequence_step_id == SequenceStep.id
+    ).filter(
         ScheduledEmail.campaign_id == campaign_id,
         ScheduledEmail.is_sent == False,
-        ScheduledEmail.is_cancelled == False,
+        ScheduledEmail.is_cancelled == False
     ).all()
 
-    for se in scheduled:
-        # Re-calculate send time with new settings
-        step = db.query(SequenceStep).get(se.sequence_step_id)
-        account = db.query(EmailAccount).get(se.email_account_id)
+    if not pending:
+        logger.info(f"No pending emails to reschedule for campaign {campaign_id}")
+        return
 
-        # Get all sends for this campaign to redistribute slots
-        all_sends = db.query(ScheduledEmail).filter(
-            ScheduledEmail.campaign_id == campaign_id,
-            ScheduledEmail.is_sent == False,
-            ScheduledEmail.is_cancelled == False,
-        ).count()
+    # Calculate limits
+    daily_limit = max(1, campaign.daily_email_limit or 250)
+    followup_percentage = campaign.followup_percentage if campaign.followup_percentage is not None else 0.40
+    max_followups_per_day = max(0, int(daily_limit * followup_percentage))
+    max_new_leads_per_day = max(1, daily_limit - max_followups_per_day)
 
-        if step and account:
-            # Find the slot index for this email
-            same_account_sends = [s for s in scheduled if s.email_account_id == account.id]
-            slot_index = same_account_sends.index(se)
+    # Sort pending emails: desired date local ascending, follow-ups first (step > 1), then original time
+    def get_sort_key(item):
+        se, step = item
+        try:
+            dt = se.scheduled_for
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=ZoneInfo("UTC"))
+            else:
+                dt = dt.astimezone(ZoneInfo("UTC"))
+            dt_local = dt.astimezone(tz)
+            local_date = dt_local.date()
+            dt_naive = dt.replace(tzinfo=None)
+        except Exception:
+            local_date = today_local
+            dt_naive = datetime.min
+        desired_date = max(local_date, earliest_date)
+        is_followup = step.step_number > 1
+        return (desired_date, 0 if is_followup else 1, dt_naive)
 
-            se.scheduled_for = _calculate_spaced_send_time(
+    pending_sorted = sorted(pending, key=get_sort_key)
+
+    daily_counts = {}
+    assigned_emails = []  # list of (se, step, assigned_date)
+
+    active_days = campaign.active_days or {}
+    day_names = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+
+    def is_active_day(date_obj):
+        day_name = day_names[date_obj.weekday()]
+        return active_days.get(day_name, True)
+
+    for se, step in pending_sorted:
+        is_followup = step.step_number > 1
+        try:
+            dt = se.scheduled_for
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=ZoneInfo("UTC"))
+            else:
+                dt = dt.astimezone(ZoneInfo("UTC"))
+            dt_local = dt.astimezone(tz)
+            local_date = dt_local.date()
+        except Exception:
+            local_date = today_local
+        current_date = max(local_date, earliest_date)
+
+        safety_counter = 0
+        while safety_counter < 365:
+            safety_counter += 1
+            if not is_active_day(current_date):
+                current_date += timedelta(days=1)
+                continue
+
+            if current_date not in daily_counts:
+                if current_date == today_local:
+                    daily_counts[current_date] = {
+                        "followups": sent_followups,
+                        "new_leads": sent_new_leads
+                    }
+                else:
+                    daily_counts[current_date] = {
+                        "followups": 0,
+                        "new_leads": 0
+                    }
+
+            counts = daily_counts[current_date]
+            total_scheduled = counts["followups"] + counts["new_leads"]
+
+            if total_scheduled < daily_limit:
+                if is_followup and counts["followups"] < max_followups_per_day:
+                    counts["followups"] += 1
+                    assigned_emails.append((se, step, current_date))
+                    break
+                elif not is_followup and counts["new_leads"] < max_new_leads_per_day:
+                    counts["new_leads"] += 1
+                    assigned_emails.append((se, step, current_date))
+                    break
+
+            current_date += timedelta(days=1)
+
+    # Group assigned emails by date to space them out
+    emails_by_date = defaultdict(list)
+    for se, step, date_obj in assigned_emails:
+        emails_by_date[date_obj].append((se, step))
+
+    # For each date, space them evenly
+    for date_obj, day_emails in emails_by_date.items():
+        by_account = defaultdict(list)
+        for se, step in day_emails:
+            by_account[se.email_account_id].append((se, step))
+
+        interleaved = []
+        accounts_lists = list(by_account.values())
+        max_len = max(len(lst) for lst in accounts_lists) if accounts_lists else 0
+        for i in range(max_len):
+            for lst in accounts_lists:
+                if i < len(lst):
+                    interleaved.append(lst[i])
+
+        total_slots = len(interleaved)
+        for slot_index, (se, step) in enumerate(interleaved):
+            se.scheduled_for = _calculate_spaced_time_for_date(
                 campaign=campaign,
-                account=account,
+                date_obj=date_obj,
                 slot_number=slot_index,
-                total_slots=len(scheduled),
-                delay_days_min=step.delay_days_min,
-                delay_days_max=step.delay_days_max,
+                total_slots=total_slots,
             )
 
-    logger.info(f"Recalculated schedule for campaign {campaign_id}: {len(scheduled)} emails rescheduled")
+    db.flush()
+    logger.info(f"Rescheduled {len(assigned_emails)} emails across future active days for campaign {campaign_id}")
+
+
+def recalculate_campaign_schedule(db: Session, campaign_id: int):
+    """
+    Re-calculate scheduled emails when campaign settings change.
+    delegates scheduling/limits to reschedule_pending_emails.
+    """
+    reschedule_pending_emails(db, campaign_id)
 
 
 def apply_campaign_change_event(db: Session, event_id: int):

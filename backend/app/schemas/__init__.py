@@ -79,6 +79,7 @@ class CampaignOut(BaseModel):
     lead_count: Optional[int] = 0
     sent_count: Optional[int] = 0
     reply_count: Optional[int] = 0
+    progress_percentage: Optional[float] = 0.0
     class Config:
         from_attributes = True
 
@@ -97,6 +98,7 @@ class EmailAccountCreate(BaseModel):
     imap_port: int = 993
     imap_use_ssl: bool = True
     daily_limit: int = 50
+    is_warming_up: Optional[bool] = False
 
 class EmailAccountOut(BaseModel):
     id: int
@@ -107,12 +109,42 @@ class EmailAccountOut(BaseModel):
     smtp_username: str
     use_tls: bool
     imap_host: Optional[str]
+    imap_port: Optional[int]
+    imap_use_ssl: Optional[bool]
     daily_limit: int
     emails_sent_today: int
     is_active: bool
+    is_warming_up: bool
+    warmup_start_date: Optional[str]
+    health_status: str
+    provider: str
     created_at: datetime
     class Config:
         from_attributes = True
+
+
+class EmailAccountUpdate(BaseModel):
+    name: Optional[str] = None
+    email: Optional[EmailStr] = None
+    smtp_host: Optional[str] = None
+    smtp_port: Optional[int] = None
+    smtp_username: Optional[str] = None
+    smtp_password: Optional[str] = None
+    use_tls: Optional[bool] = None
+    imap_host: Optional[str] = None
+    imap_port: Optional[int] = None
+    imap_use_ssl: Optional[bool] = None
+    daily_limit: Optional[int] = None
+    is_active: Optional[bool] = None
+    is_warming_up: Optional[bool] = None
+    warmup_start_date: Optional[str] = None
+
+
+class EmailAccountsBulkUpdate(BaseModel):
+    account_ids: List[int]
+    daily_limit: Optional[int] = None
+    is_active: Optional[bool] = None
+    is_warming_up: Optional[bool] = None
 
 
 # ─── Sequence ─────────────────────────────────────────────────────────────────
@@ -121,7 +153,7 @@ class SequenceStepCreate(BaseModel):
     step_number: int
     delay_days_min: int = 0
     delay_days_max: int = 0
-    subject: str
+    subject: Optional[str] = ""
     body: str
     is_plain_text: bool = True
 
@@ -130,7 +162,7 @@ class SequenceStepOut(BaseModel):
     step_number: int
     delay_days_min: int
     delay_days_max: int
-    subject: str
+    subject: Optional[str] = None
     body: str
     is_plain_text: bool
     class Config:
@@ -243,3 +275,36 @@ class ActivityFeedOut(BaseModel):
     events: List[ActivityEventOut]
     total: int
     has_more: bool
+
+
+# ─── Campaign Export/Import ──────────────────────────────────────────────────
+
+class CampaignExportSettings(BaseModel):
+    name: str
+    active_days: ActiveDays
+    sending_window_start: str
+    sending_window_end: str
+    daily_new_leads: int
+    followup_percentage: float
+    daily_email_limit: int
+    timezone: str
+    track_open_rate: bool
+    track_reply_rate: bool
+
+class SequenceStepImportExport(BaseModel):
+    step_number: int
+    delay_days_min: int = 0
+    delay_days_max: int = 0
+    subject: Optional[str] = ""
+    body: str
+    is_plain_text: bool = True
+
+class SequenceImportExport(BaseModel):
+    name: str = "Main Sequence"
+    is_main_variant: bool = False
+    variant_weight: Optional[int] = 100
+    steps: List[SequenceStepImportExport]
+
+class CampaignImportExport(BaseModel):
+    settings: CampaignExportSettings
+    sequences: List[SequenceImportExport]

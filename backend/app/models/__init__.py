@@ -208,7 +208,7 @@ class SequenceStep(Base):
     delay_days_min = Column(Integer, default=0)
     delay_days_max = Column(Integer, default=0)
 
-    subject = Column(String(500), nullable=False)
+    subject = Column(String(500), nullable=True)
     body = Column(Text, nullable=False)
     is_plain_text = Column(Boolean, default=True)  # Plain text for deliverability
 

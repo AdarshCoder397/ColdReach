@@ -58,3 +58,27 @@
 ::-webkit-scrollbar-thumb:hover {
   background: #94a3b8;
 }
+
+/* Hyperlinks in rich HTML editor and email previews */
+.preview-html-body a, .rich-editor-content a {
+  color: #2563eb !important;
+  text-decoration: underline !important;
+}
+.preview-html-body a:hover, .rich-editor-content a:hover {
+  color: #1d4ed8 !important;
+}
+
+.preview-html-body ul, .rich-editor-content ul {
+  list-style-type: disc !important;
+  padding-left: 1.5rem !important;
+  margin-top: 0.5rem !important;
+  margin-bottom: 0.5rem !important;
+}
+
+.preview-html-body ol, .rich-editor-content ol {
+  list-style-type: decimal !important;
+  padding-left: 1.5rem !important;
+  margin-top: 0.5rem !important;
+  margin-bottom: 0.5rem !important;
+}
+
