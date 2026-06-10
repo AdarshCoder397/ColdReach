@@ -3,6 +3,10 @@
 # Start Redis server in the background
 redis-server --daemonize yes
 
+# Run database migrations
+echo "Running database migrations..."
+alembic upgrade head
+
 # Start Celery beat in the background
 celery -A app.workers.tasks.celery_app beat --loglevel=info &
 
@@ -11,3 +15,4 @@ celery -A app.workers.tasks.celery_app worker --loglevel=info --concurrency=1 &
 
 # Start FastAPI server in the foreground
 uvicorn main:app --host 0.0.0.0 --port 10000
+
