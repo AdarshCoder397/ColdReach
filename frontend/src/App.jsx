@@ -4065,11 +4065,171 @@ const EMAIL_PROVIDERS = {
   },
 };
 
+// ─── Import Email Accounts ───────────────────────────────────────────────────
+function ImportEmailAccounts({ onDone, onImported }) {
+  const [file, setFile] = useState(null);
+  const [result, setResult] = useState(null);
+  const [importError, setImportError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const downloadTemplate = () => {
+    const headers = [
+      "name",
+      "email",
+      "smtp_host",
+      "smtp_port",
+      "smtp_username",
+      "smtp_password",
+      "use_tls",
+      "imap_host",
+      "imap_port",
+      "imap_use_ssl",
+      "daily_limit",
+      "is_warming_up"
+    ];
+    const sampleRow = [
+      "Sales Account 1",
+      "sales1@example.com",
+      "smtp.gmail.com",
+      "587",
+      "sales1@example.com",
+      "your-app-password",
+      "true",
+      "imap.gmail.com",
+      "993",
+      "true",
+      "50",
+      "false"
+    ];
+    const csvContent = "data:text/csv;charset=utf-8," 
+      + [headers.join(","), sampleRow.join(",")].join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", "email_accounts_template.csv");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const submit = async () => {
+    if (!file) return;
+    setLoading(true);
+    setImportError("");
+    setResult(null);
+    const form = new FormData();
+    form.append("file", file);
+    try {
+      const res = await fetch(`${API}/email-accounts/bulk-import`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${getToken()}` },
+        body: form,
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setImportError(data.detail || "Import failed. Please check your CSV format.");
+      } else {
+        setResult(data);
+        if (onImported) onImported();
+      }
+    } catch (err) {
+      setImportError("Network error — could not reach the server.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Card className="p-6 mb-6 border-indigo-100 bg-indigo-50/10 shadow-sm">
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="font-bold text-slate-900 text-sm">Bulk Import Email Accounts</h3>
+        <button
+          type="button"
+          onClick={downloadTemplate}
+          className="text-xs text-indigo-600 hover:text-indigo-800 font-bold flex items-center gap-1 cursor-pointer outline-none focus:outline-none"
+        >
+          📥 Download CSV Template
+        </button>
+      </div>
+      <p className="text-xs text-slate-500 mb-4 leading-relaxed">
+        Upload a CSV or Excel file containing email account credentials. The system will automatically run SMTP connection tests in bulk and only import accounts with successful connections.
+      </p>
+
+      <div className="flex flex-wrap gap-2.5 items-center">
+        <label className="inline-flex items-center gap-2 px-3.5 py-2 border border-slate-200 rounded-xl bg-white text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer shadow-sm active:scale-[0.98] transition-all">
+          <svg className="w-3.5 h-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.2}><path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
+          {file ? file.name : "Choose CSV or Excel File"}
+          <input type="file" accept=".csv,.xlsx,.xls" onChange={e => setFile(e.target.files[0])} className="hidden" />
+        </label>
+        <Button size="sm" onClick={submit} disabled={!file || loading}>
+          {loading ? (
+            <span className="flex items-center gap-1.5">
+              <span className="w-3 h-3 border border-white/30 border-t-white rounded-full animate-spin" />
+              Verifying SMTP Connections...
+            </span>
+          ) : "Start Import & Verify"}
+        </Button>
+        <Button size="sm" variant="secondary" onClick={onDone}>Cancel</Button>
+      </div>
+
+      {importError && (
+        <div className="mt-4 text-xs font-semibold bg-rose-50 border border-rose-100 text-rose-700 p-4 rounded-xl">
+          ✗ {importError}
+        </div>
+      )}
+
+      {result && (
+        <div className="mt-4 space-y-4">
+          <div className="text-xs font-semibold bg-indigo-50 border border-indigo-100 text-indigo-800 p-4 rounded-xl flex items-center justify-between">
+            <span>
+              ✓ Successfully verified and imported <strong>{result.imported}</strong> email account{result.imported !== 1 ? 's' : ''}.
+              {result.failed > 0 && <> Failed connection tests on <strong>{result.failed}</strong> account{result.failed !== 1 ? 's' : ''}.</>}
+            </span>
+            <Button size="sm" variant="ghost" onClick={onDone}>Close</Button>
+          </div>
+
+          {result.results && result.results.length > 0 && (
+            <div className="border border-slate-200/60 rounded-xl overflow-hidden bg-white shadow-sm">
+              <div className="bg-slate-50 border-b border-slate-200/60 px-4 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                Verification Report
+              </div>
+              <div className="divide-y divide-slate-100 max-h-60 overflow-y-auto">
+                {result.results.map((r, i) => (
+                  <div key={i} className="px-4 py-2.5 flex items-center justify-between text-xs gap-4">
+                    <span className="font-mono text-slate-700 truncate">{r.email}</span>
+                    {r.status === "success" ? (
+                      <span className="px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 font-bold border border-emerald-100 text-[10px]">
+                        Passed & Verified
+                      </span>
+                    ) : (
+                      <div className="text-right">
+                        <span className="px-2 py-0.5 rounded bg-rose-50 text-rose-700 font-bold border border-rose-100 text-[10px] inline-block">
+                          Verification Failed
+                        </span>
+                        {r.error && (
+                          <p className="text-[10px] text-rose-500 mt-1 font-medium max-w-xs md:max-w-md break-words">
+                            {r.error}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 // ─── Email Accounts ───────────────────────────────────────────────────────────
 function EmailAccounts() {
   const [accounts, setAccounts] = useState([]);
   const [showPicker, setShowPicker] = useState(false);
   const [showForm, setShowForm] = useState(false);
+  const [showImport, setShowImport] = useState(false);
   const [form, setForm] = useState({
     name: "", email: "", smtp_host: "", smtp_port: 587,
     smtp_username: "", smtp_password: "", use_tls: true,
@@ -4224,8 +4384,18 @@ function EmailAccounts() {
     <div>
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-xl font-semibold">Email Accounts</h2>
-        <Button onClick={() => setShowPicker(true)}>+ Add Account</Button>
+        <div className="flex gap-2.5">
+          <Button variant="secondary" onClick={() => setShowImport(true)}>📥 Bulk Import</Button>
+          <Button onClick={() => setShowPicker(true)}>+ Add Account</Button>
+        </div>
       </div>
+
+      {showImport && (
+        <ImportEmailAccounts
+          onDone={() => setShowImport(false)}
+          onImported={load}
+        />
+      )}
 
       {showPicker && createPortal(
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">

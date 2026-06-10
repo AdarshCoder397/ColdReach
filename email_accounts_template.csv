@@ -1,0 +1,3 @@
+name,email,smtp_host,smtp_port,smtp_username,smtp_password,use_tls,imap_host,imap_port,imap_use_ssl,daily_limit,is_warming_up
+Sales Account 1,sales1@example.com,smtp.gmail.com,587,sales1@example.com,your-app-password,true,imap.gmail.com,993,true,50,false
+Sales Account 2,sales2@example.com,smtp.office365.com,587,sales2@example.com,your-office365-password,true,outlook.office365.com,993,true,50,true

@@ -308,3 +308,16 @@ class SequenceImportExport(BaseModel):
 class CampaignImportExport(BaseModel):
     settings: CampaignExportSettings
     sequences: List[SequenceImportExport]
+
+
+# ─── Bulk Import Email Accounts ───────────────────────────────────────────────
+
+class EmailAccountImportResultItem(BaseModel):
+    email: str
+    status: str  # "success" or "failed"
+    error: Optional[str] = None
+
+class EmailAccountsBulkImportResult(BaseModel):
+    imported: int
+    failed: int
+    results: List[EmailAccountImportResultItem]

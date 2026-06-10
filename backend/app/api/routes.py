@@ -25,6 +25,7 @@ from app.schemas import (
     UserCreate, UserOut, Token,
     CampaignCreate, CampaignUpdate, CampaignOut, CampaignImportExport,
     EmailAccountCreate, EmailAccountOut, EmailAccountUpdate, EmailAccountsBulkUpdate,
+    EmailAccountImportResultItem, EmailAccountsBulkImportResult,
     SequenceCreate, SequenceOut,
     LeadCreate, LeadOut, LeadImportResult,
     ConversationOut, CampaignStats,
@@ -707,17 +708,36 @@ def list_accounts(db: Session = Depends(get_db), user: User = Depends(get_curren
     return db.query(EmailAccount).filter(EmailAccount.owner_id == user.id).all()
 
 
+def _clean_email_or_username(val: str) -> str:
+    if not val:
+        return ""
+    return str(val).strip().replace('\xa0', '').replace(' ', '')
+
+
+def _clean_password(password: str, email: str = "", smtp_host: str = "") -> str:
+    if not password:
+        return ""
+    cleaned = str(password).strip().replace('\xa0', ' ')
+    if "gmail.com" in email.lower() or "smtp.gmail.com" in smtp_host.lower():
+        cleaned = cleaned.replace(" ", "")
+    return cleaned
+
+
 @router.post("/email-accounts", response_model=EmailAccountOut, status_code=201)
 def add_account(payload: EmailAccountCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     is_warming = payload.is_warming_up or False
+    cleaned_email = _clean_email_or_username(payload.email)
+    cleaned_username = _clean_email_or_username(payload.smtp_username)
+    cleaned_password = _clean_password(payload.smtp_password, cleaned_email, payload.smtp_host)
+
     account = EmailAccount(
         owner_id=user.id,
         name=payload.name,
-        email=payload.email,
+        email=cleaned_email,
         smtp_host=payload.smtp_host,
         smtp_port=payload.smtp_port,
-        smtp_username=payload.smtp_username,
-        smtp_password_encrypted=encrypt_password(payload.smtp_password),
+        smtp_username=cleaned_username,
+        smtp_password_encrypted=encrypt_password(cleaned_password),
         use_tls=payload.use_tls,
         imap_host=payload.imap_host,
         imap_port=payload.imap_port,
@@ -726,12 +746,247 @@ def add_account(payload: EmailAccountCreate, db: Session = Depends(get_db), user
         is_warming_up=is_warming,
         health_status="WARMING" if is_warming else "HEALTHY",
         warmup_start_date=datetime.utcnow().strftime("%Y-%m-%d") if is_warming else None,
-        warmup_day_number=1 if is_warming else 1,
+        warmup_day_number=1,
     )
     db.add(account)
     db.commit()
     db.refresh(account)
     return account
+
+
+@router.post("/email-accounts/bulk-import", response_model=EmailAccountsBulkImportResult)
+async def bulk_import_email_accounts(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user)
+):
+    """
+    Bulk import email accounts from a CSV or Excel file.
+    Automatically verifies the SMTP connection of all accounts.
+    Only successfully verified accounts are saved to the database.
+    """
+    content = await file.read()
+    filename = (file.filename or "").lower()
+
+    df = None
+    parse_error = None
+
+    # 1. Try as Excel if extension matches
+    if filename.endswith(".xlsx") or filename.endswith(".xls"):
+        try:
+            df = pd.read_excel(io.BytesIO(content))
+        except Exception as e:
+            parse_error = f"Excel parse failed: {e}"
+
+    # 2. Try CSV with multiple encodings
+    if df is None:
+        for enc in ("utf-8-sig", "utf-8", "latin-1", "cp1252"):
+            try:
+                df = pd.read_csv(io.BytesIO(content), encoding=enc)
+                parse_error = None
+                break
+            except UnicodeDecodeError:
+                continue
+            except Exception as e:
+                parse_error = f"CSV parse failed: {e}"
+                break
+
+    # 3. Last resort: try as Excel even without extension
+    if df is None:
+        try:
+            df = pd.read_excel(io.BytesIO(content))
+            parse_error = None
+        except Exception as e:
+            parse_error = parse_error or f"Could not parse file: {e}"
+
+    if df is None:
+        raise HTTPException(400, parse_error or "Could not parse file as CSV or Excel")
+
+    # Normalize column names: strip whitespace, lowercase, replace spaces/hyphens with underscores
+    df.columns = [str(c).strip().lower().replace(" ", "_").replace("-", "_") for c in df.columns]
+
+    # Map common synonyms to standard field names
+    column_mappings = {
+        "sender_email": "email",
+        "host": "smtp_host",
+        "smtp_server": "smtp_host",
+        "port": "smtp_port",
+        "username": "smtp_username",
+        "user": "smtp_username",
+        "password": "smtp_password",
+        "pass": "smtp_password",
+        "pwd": "smtp_password",
+        "display_name": "name",
+    }
+    df.rename(columns=column_mappings, inplace=True)
+
+    required_cols = {"email", "smtp_host", "smtp_port", "smtp_username", "smtp_password"}
+    missing = required_cols - set(df.columns)
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Missing required columns: {', '.join(missing)}. Your columns: {list(df.columns)}"
+        )
+
+    imported = 0
+    failed = 0
+    results = []
+    import smtplib
+
+    for _, row in df.iterrows():
+        email_raw = str(row.get("email", ""))
+        email = _clean_email_or_username(email_raw).lower()
+        if not email or "@" not in email:
+            failed += 1
+            results.append(EmailAccountImportResultItem(
+                email=email or "unknown",
+                status="failed",
+                error="Invalid email address format"
+            ))
+            continue
+
+        smtp_host = str(row.get("smtp_host", "")).strip()
+        smtp_port_val = row.get("smtp_port")
+        try:
+            smtp_port = int(float(smtp_port_val)) if pd.notna(smtp_port_val) else 587
+        except:
+            smtp_port = 587
+
+        smtp_username_raw = str(row.get("smtp_username", ""))
+        smtp_username = _clean_email_or_username(smtp_username_raw)
+        
+        smtp_password_raw = str(row.get("smtp_password", ""))
+        smtp_password = _clean_password(smtp_password_raw, email, smtp_host)
+
+        # Parse boolean helper
+        def parse_bool(val, default=True):
+            if pd.isna(val):
+                return default
+            val_str = str(val).strip().lower()
+            return val_str in ("true", "1", "yes", "y", "t")
+
+        use_tls = parse_bool(row.get("use_tls"), True)
+
+        imap_host = str(row.get("imap_host", "")).strip() if pd.notna(row.get("imap_host")) else None
+        if imap_host == "":
+            imap_host = None
+
+        imap_port_val = row.get("imap_port")
+        try:
+            imap_port = int(float(imap_port_val)) if pd.notna(imap_port_val) else 993
+        except:
+            imap_port = 993
+
+        imap_use_ssl = parse_bool(row.get("imap_use_ssl"), True)
+
+        limit_val = row.get("daily_limit")
+        try:
+            daily_limit = int(float(limit_val)) if pd.notna(limit_val) else 50
+        except:
+            daily_limit = 50
+
+        is_warming_up = parse_bool(row.get("is_warming_up"), False)
+
+        name = str(row.get("name", "")).strip() if pd.notna(row.get("name")) else ""
+        if not name:
+            name = email.split("@")[0].capitalize()
+
+        # Verify SMTP connection
+        conn_ok = False
+        err_msg = None
+        try:
+            if use_tls:
+                server = smtplib.SMTP(smtp_host, smtp_port, timeout=10)
+                server.ehlo()
+                server.starttls()
+                server.ehlo()
+            else:
+                server = smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=10)
+                server.ehlo()
+            
+            server.login(smtp_username, smtp_password)
+            server.quit()
+            conn_ok = True
+        except Exception as e:
+            err_msg = str(e)
+
+        if conn_ok:
+            try:
+                # Check duplicate
+                account = db.query(EmailAccount).filter(
+                    EmailAccount.email == email,
+                    EmailAccount.owner_id == user.id
+                ).first()
+
+                is_warming = is_warming_up
+                encrypted_pass = encrypt_password(smtp_password)
+
+                if account:
+                    account.name = name
+                    account.smtp_host = smtp_host
+                    account.smtp_port = smtp_port
+                    account.smtp_username = smtp_username
+                    account.smtp_password_encrypted = encrypted_pass
+                    account.use_tls = use_tls
+                    account.imap_host = imap_host
+                    account.imap_port = imap_port
+                    account.imap_use_ssl = imap_use_ssl
+                    account.daily_limit = daily_limit
+                    account.is_warming_up = is_warming
+                    if is_warming:
+                        account.health_status = "WARMING"
+                        if not account.warmup_start_date:
+                            account.warmup_start_date = datetime.utcnow().strftime("%Y-%m-%d")
+                    else:
+                        account.health_status = "HEALTHY"
+                else:
+                    account = EmailAccount(
+                        owner_id=user.id,
+                        name=name,
+                        email=email,
+                        smtp_host=smtp_host,
+                        smtp_port=smtp_port,
+                        smtp_username=smtp_username,
+                        smtp_password_encrypted=encrypted_pass,
+                        use_tls=use_tls,
+                        imap_host=imap_host,
+                        imap_port=imap_port,
+                        imap_use_ssl=imap_use_ssl,
+                        daily_limit=daily_limit,
+                        is_warming_up=is_warming,
+                        health_status="WARMING" if is_warming else "HEALTHY",
+                        warmup_start_date=datetime.utcnow().strftime("%Y-%m-%d") if is_warming else None,
+                        warmup_day_number=1,
+                    )
+                    db.add(account)
+                
+                db.commit()
+                imported += 1
+                results.append(EmailAccountImportResultItem(
+                    email=email,
+                    status="success"
+                ))
+            except Exception as db_err:
+                db.rollback()
+                failed += 1
+                results.append(EmailAccountImportResultItem(
+                    email=email,
+                    status="failed",
+                    error=f"Database save error: {str(db_err)}"
+                ))
+        else:
+            failed += 1
+            results.append(EmailAccountImportResultItem(
+                email=email,
+                status="failed",
+                error=f"SMTP Connection verification failed: {err_msg}"
+            ))
+
+    return EmailAccountsBulkImportResult(
+        imported=imported,
+        failed=failed,
+        results=results
+    )
 
 
 @router.patch("/email-accounts/bulk")
@@ -822,7 +1077,11 @@ def update_account(
                 needs_reschedule = True
  
         if field == "smtp_password":
-            account.smtp_password_encrypted = encrypt_password(value)
+            cleaned_val = _clean_password(value, account.email, account.smtp_host)
+            account.smtp_password_encrypted = encrypt_password(cleaned_val)
+        elif field in ("email", "smtp_username"):
+            cleaned_val = _clean_email_or_username(value)
+            setattr(account, field, cleaned_val)
         elif field == "is_warming_up":
             account.is_warming_up = value
             if value:
@@ -1694,11 +1953,15 @@ def test_email_connection(
     import smtplib
     from app.core.encryption import decrypt_password
 
+    cleaned_email = _clean_email_or_username(payload.email)
+    cleaned_username = _clean_email_or_username(payload.smtp_username)
+    cleaned_password = _clean_password(payload.smtp_password, cleaned_email, payload.smtp_host)
+
     try:
         server = smtplib.SMTP(payload.smtp_host, payload.smtp_port, timeout=10)
         if payload.use_tls:
             server.starttls()
-        server.login(payload.smtp_username, payload.smtp_password)
+        server.login(cleaned_username, cleaned_password)
         server.quit()
         return {"message": "Connection successful"}
     except Exception as e:
